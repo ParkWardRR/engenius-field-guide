@@ -1,0 +1,7 @@
+# Never commit real controller env files (they carry Mongo/Redis secrets).
+# Only the .example template is tracked.
+.epc-prod
+!.epc-prod.example
+*.pem
+*.key
+*.crt

@@ -1,0 +1,15 @@
+# Example environment file for the EPC Podman compose (referenced as --env-file).
+#
+# Copy this to .epc-prod and fill in the rest on the host. Only the two values
+# below are safe to publish — they are just the public image registry and the
+# release version:
+#
+# NOTE: The real .epc-prod also contains MONGO_USER, MONGO_PASSWORD, and
+# REDIS_PASS. Those secrets are generated on the host during install and must
+# NEVER be committed to version control. Do not add them here.
+
+# Public AWS ECR registry (no authentication required)
+REPOSITORY_URI=public.ecr.aws/d3g4m7o9/
+
+# EPC release to deploy
+VERSION=1.8.8

@@ -1,0 +1,109 @@
+# EnGenius Private Cloud (EPC) 1.8.8 — Podman adaptation for AlmaLinux 10
+#
+# Translated from EnGenius's official Docker compose shipped inside
+# epc-pkg.tar.gz (http://engenius-epc.s3.us-west-2.amazonaws.com/dev/1.8.8/).
+# Images come from AWS public ECR (no auth): public.ecr.aws/d3g4m7o9/
+#
+# Key changes vs. the upstream Docker compose:
+#   1. /var/run/docker.sock  ->  /run/podman/podman.sock
+#      (epc-api orchestrates the other containers via the container API;
+#       Podman's socket speaks the Docker API. Enable it with:
+#       `sudo systemctl enable --now podman.socket`)
+#   2. epc-api gets `security_opt: label=disable` so SELinux lets it use
+#      the podman socket.
+#   3. SELinux: host dirs are labelled container_file_t persistently via
+#      `semanage fcontext` + `restorecon` (see ../../docs/controllers/epc-podman-almalinux.md). Volume
+#      mounts use the shared `:z` suffix (not `:Z`) so a later `restorecon`
+#      can't strip a private MCS category and break access.
+#
+# Deploy:  sudo podman-compose --env-file .epc-prod up -d
+# NOTE: this bypasses EnGenius's epc.sh watchdog (fitdog) + named pipes.
+#       See ../../docs/controllers/epc-podman-almalinux.md for the caveats before relying on it.
+version: "2"
+
+networks:
+  epc:
+    driver: bridge
+    name: epc
+
+services:
+  epc-db:                       # MongoDB + Redis (data + auth store)
+    image: ${REPOSITORY_URI}epc-db:${VERSION}
+    command: [/start-db.sh]
+    networks: [epc]
+    container_name: epc-db
+    volumes:
+      - /srv/docker/mongodb/data/db:/data/db:z
+      - /srv/docker/redis:/var/lib/redis:z
+      - /var/log/epc/mongodb:/var/log/mongodb:z
+      - /var/log/epc/redis:/var/log/redis:z
+      - /epc:/epc:z
+    restart: always
+    logging: {driver: json-file, options: {max-size: 10m, max-file: "5"}}
+
+  epc-api:                      # main backend (nginx + gunicorn); UI on 8080/443
+    image: ${REPOSITORY_URI}epc-api:${VERSION}
+    depends_on: [epc-db]
+    ports: ["8080:80", "443:443"]
+    command: [/start.sh]
+    networks: [epc]
+    container_name: epc-api
+    security_opt:
+      - label=disable           # allow access to the podman API socket
+    volumes:
+      - /epc:/epc:z
+      - /var/log/epc/nginx:/var/log/nginx:z
+      - /var/log/epc/gunicorn:/var/log/gunicorn:z
+      - /var/log/epc/api:/var/log/api:z
+      - /run/podman/podman.sock:/var/run/docker.sock   # was /var/run/docker.sock
+      - /root/cert:/root/cert:z
+    restart: always
+    logging: {driver: json-file, options: {max-size: 10m, max-file: "5"}}
+
+  epc-mdns:                     # mDNS/bonjour discovery (host network)
+    image: ${REPOSITORY_URI}epc-mdns:${VERSION}
+    command: /start-mdns.sh
+    network_mode: host
+    volumes:
+      - /epc:/epc:z
+    container_name: epc-mdns
+    restart: always
+    logging: {driver: json-file, options: {max-size: 10m, max-file: "5"}}
+
+  epc-raccoon:                  # portal / reverse proxy front (port 80)
+    image: ${REPOSITORY_URI}epc-raccoon:${VERSION}
+    depends_on: [epc-db]
+    ports: ["80:80"]
+    command: [/app/raccoon]
+    networks: [epc]
+    volumes:
+      - /epc:/epc:z
+      - /var/log/epc/raccoon:/var/log/raccoon:z
+    container_name: epc-raccoon
+    restart: always
+    logging: {driver: json-file, options: {max-size: 10m, max-file: "5"}}
+
+  epc-otter:                    # background worker/service
+    image: ${REPOSITORY_URI}epc-otter:${VERSION}
+    depends_on: [epc-db]
+    command: [/app/start-otter.sh]
+    networks: [epc]
+    volumes:
+      - /epc:/epc:z
+      - /var/log/epc/otter:/var/log/otter:z
+    container_name: epc-otter
+    restart: always
+    logging: {driver: json-file, options: {max-size: 10m, max-file: "5"}}
+
+  epc-radius:                   # FreeRADIUS (802.1X / CoA)
+    image: ${REPOSITORY_URI}epc-radius:${VERSION}
+    depends_on: [epc-api, epc-db]
+    ports:
+      - "1812-1813:1812-1813/udp"
+      - "18120:18120"
+      - "3799:3799/udp"
+    command: [/start-radius.sh]
+    networks: [epc]
+    container_name: epc-radius
+    restart: always
+    logging: {driver: json-file, options: {max-size: 10m, max-file: "5"}}
