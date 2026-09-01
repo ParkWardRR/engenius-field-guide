@@ -2,10 +2,10 @@
 
 # EnGenius Field Guide
 
-Unofficial field notes for EnGenius/Senao WiFi hardware and the self-hosted
-controllers that manage it — running the local Fit Controller / EnGenius Private
-Cloud (EPC), reaching the device backend, decoding serials, and cross-flashing
-hardware-equivalent models.
+### Make EnGenius/Senao gear do what you want.
+
+Self-host the controller. Adopt the devices it says it can't. Cross-flash between
+models. Decode the hardware. The practical, unofficial notes EnGenius doesn't ship.
 
 [![License: Blue Oak 1.0.0](https://img.shields.io/badge/License-Blue_Oak_1.0.0-0a7bbb.svg)](LICENSE)
 [![Status: unofficial](https://img.shields.io/badge/status-unofficial-orange.svg)](#scope)
@@ -25,41 +25,41 @@ hardware-equivalent models.
 
 </div>
 
-## How it fits together
+---
 
-```mermaid
-flowchart LR
-    EWS["EWS<br/>managed APs"] --> EZ["ezMaster<br/>(EOL)"]
-    ENS["ENS / ENH<br/>outdoor + indoor"] --> EZ
-    FIT["-FIT variants<br/>EWS377-FIT, EWS850-FIT"] --> FC["Fit Controller / EPC<br/>(self-hostable)"]
-    ECS["ECS / ECS-Lite<br/>switches"] --> FC
-    ECW["ECW<br/>cloud APs"] --> CLOUD["EnGenius Cloud<br/>(hosted)"]
-    ECW -.->|since early 2024| FC
-```
+EnGenius's on-prem tooling is powerful and barely documented. This guide is the
+missing manual: tested, no-fluff, straight to the commands.
+
+## What you can do with it
+
+🖥️ **Run the controller yourself.** Deploy EnGenius Private Cloud (EPC) as
+Podman containers on AlmaLinux — hardened, SELinux **Enforcing**, reboot-proof —
+or run the Fit Controller stack on a Raspberry Pi. No appliance, no cloud.
+→ [EPC on Podman/AlmaLinux](docs/controllers/epc-podman-almalinux.md) ·
+[Fit Controller on ARM](docs/controllers/self-hosting-fitcon-arm.md)
+
+📡 **Adopt devices the controller rejects.** That "unsupported" AP usually works
+fine — the controller just doesn't have it whitelisted. Add the model to its
+database, or cross-flash the device to a supported sibling.
+→ [Whitelist a model](docs/controllers/add-unknown-models.md) ·
+[Cross-flashing](docs/firmware/cross-flashing.md)
+
+🔧 **Go under the hood.** Decode or forge serials (the Code27 checksum), read the
+Senao firmware header, and reach the controller's MongoDB/Redis directly.
+→ [Serial numbers](docs/firmware/serial-numbers.md) ·
+[Firmware format](docs/firmware/firmware-format.md) ·
+[Backend access](docs/controllers/backend-access.md)
 
 ## Start here
 
-| Goal | Go to |
-|------|-------|
-| Self-host a controller | [landscape](docs/controllers/landscape.md) → [EPC on Podman/AlmaLinux (x86)](docs/controllers/epc-podman-almalinux.md) or [Fit Controller on ARM](docs/controllers/self-hosting-fitcon-arm.md) |
+| Your goal | Go to |
+|-----------|-------|
+| Self-host a controller | [landscape](docs/controllers/landscape.md) → [EPC on x86](docs/controllers/epc-podman-almalinux.md) or [Fit Controller on ARM](docs/controllers/self-hosting-fitcon-arm.md) |
 | Adopt a device the controller rejects | [whitelist the model](docs/controllers/add-unknown-models.md) or [cross-flash it](docs/firmware/cross-flashing.md) |
 | Decode/generate a serial | [serial-numbers](docs/firmware/serial-numbers.md) |
 | Understand product lines / shared hardware | [overview](docs/overview.md), [model-equivalence](docs/hardware/model-equivalence.md) |
 
-### Adopting a device the controller won't take
-
-```mermaid
-flowchart TD
-    A["Controller won't adopt a device"] --> B{"Device works,<br/>just not on the list?"}
-    B -->|Yes| C["Whitelist the model<br/>in Mongo + sync Redis"]
-    B -->|"No — wrong firmware line"| D{"Hardware-equivalent<br/>Fit/ECW sibling?"}
-    D -->|Yes| E["Cross-flash to the sibling"]
-    D -->|No| F["Not supported"]
-    C --> G(["Device adopted"])
-    E --> G
-```
-
-## Contents
+## All docs
 
 | Doc | Covers |
 |-----|--------|
@@ -79,16 +79,19 @@ flowchart TD
 
 ## Scope
 
-Unofficial community notes for education and interoperability, not endorsed by or
+Unofficial community notes for education and interoperability — not endorsed by or
 affiliated with the vendor. "EnGenius" and "Senao" are trademarks of their
-owners. Expect gaps; verify before relying on anything.
+owners. Expect gaps; verify before you rely on anything, especially firmware
+flashing (it can brick hardware).
 
 ## Contributing
 
-Corrections and additions welcome — especially verified [model codes](docs/firmware/model-codes.md)
-and hardware-equivalence pairs. Open an issue or PR.
+Corrections and additions welcome — especially verified
+[model codes](docs/firmware/model-codes.md) and hardware-equivalence pairs. Open
+an issue or PR.
 
 ## License
 
 [Blue Oak Model License 1.0.0](LICENSE). Underlying knowledge credited in
-[CREDITS.md](CREDITS.md).
+[CREDITS.md](CREDITS.md) — much of it re-documented from
+[DaveCorder's notes](https://github.com/DaveCorder/EnGenius).
