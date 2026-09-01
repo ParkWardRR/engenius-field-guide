@@ -43,11 +43,30 @@ gates on `product_id` **only** — not the model string, md5, or chksum. Patchin
   patched image, and `/bin/header -x` de-wraps it (`MD5 check OK!`) into a valid
   same-board FIT — so `platform_check_image` passes and it flashes as a normal
   sysupgrade. No vendor `ews377apv3-5.1.4-1.zip`, forced flag, or bootloader
-  work needed. (The flash itself was not executed here — everything up to it is
-  confirmed.)
+  work needed.
 - the v3 **has** the per-device `cert` MTD partition (`mtd9`), which a rootfs
   sysupgrade preserves — so the converted AP keeps the cert it needs to register
-  with a Fit Controller (unlike the cert-less ENS620EXT case above).
+  with a controller (unlike the cert-less ENS620EXT case above).
+
+**Confirmed end to end.** Flashing a `product_id`-patched `ews377-fit-1.0.4-3`
+via `sysupgrade -n` on an EWS377AP v3 succeeded: `header -x` de-wrapped it, the
+FIT (`d00dfeed`) passed `platform_check_image`, and it wrote the UBI rootfs and
+rebooted into EWS377-FIT (old EWS credentials/GUI gone, FIT firmware serving).
+Two practical notes:
+
+- **Dual-image (A/B) preserves the old firmware, temporarily.** The Senao
+  upgrade writes to the *inactive* rootfs slot (`rootfs_1`) and switches the boot
+  pointer, leaving stock EWS377APv3 intact on the other slot (`rootfs`) as an
+  automatic fallback — until the first FIT firmware update reclaims that slot for
+  its own A/B cycle. Keep a copy of the stock `.bin` off-box for a durable
+  rollback; don't rely on the slot surviving an update.
+- **A FIT AP serves no local web GUI.** After conversion `https://<ap>/` returns
+  a bare `404` (lighttpd is up, but there's no LuCI/admin page — FIT firmware is
+  controller-managed). That 404 is itself a quick confirmation the cross-flash
+  took: EnSky/EWS firmware serves a login at `/`, FIT does not.
+- **Controller series matters.** EWS377-FIT is series `fit`; an EnGenius Private
+  Cloud (EPC) manages the `cloud`/`cloud-lite`/`fit`/`neutron` series and lists
+  EWS377-FIT (`X45`) as a supported model, so a converted AP is adoptable there.
 
 ## Adding to this list
 
