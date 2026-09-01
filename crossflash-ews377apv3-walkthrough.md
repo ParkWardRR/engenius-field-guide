@@ -141,7 +141,7 @@ an iptables redirect of just the AP works) and you see the exact problem:
 
 ```
 POST /api/v1/checkin HTTP/1.1
-Kaiwoo-authentication: id=88:DC:97:04:44:07,timestamp=…,nonce=…,sn=00000000000000000000
+Kaiwoo-authentication: id=88:DC:97:xx:xx:xx,timestamp=…,nonce=…,sn=00000000000000000000
 ```
 
 **The `sn` is all zeros — a blank serial.** The EPC keys every device by serial:
