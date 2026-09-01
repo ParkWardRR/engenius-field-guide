@@ -251,19 +251,28 @@ controller with **DHCP option 43 = the EPC IP** (raw 4-byte address) — EnGeniu
 
 ### 8d. The auth gate (why check-ins can 404 forever)
 
-Device auth is **mutual-TLS**: the AP presents a client certificate from its
-per-device `cert` MTD partition, and `epc-api` derives the device `id` from it.
-If the cert-identity isn't an accepted/registered device, the check-in loop fails
-at auth — the app logs `handle_auth_request … checkin key error: 'id'` and
-returns 4xx, and the device never enrolls. Watch it live:
+The device identifies itself in a header, not a client cert (the EPC does **not**
+send a `CertificateRequest` on `/api/v1/checkin`):
+
+```
+Kaiwoo-authentication: id=<mac>,timestamp=…,nonce=…,sn=<serial>
+```
+
+`epc-api` keys the device by **serial**: a Redis Lua `HMGET device/<sn> secret` —
+no record ⇒ `DEVICE_NOT_FOUND`, surfaced as `handle_auth_request … checkin key
+error: 'id'` and a 4xx loop. Watch it live:
 
 ```bash
 sudo podman exec epc-api sh -c 'tail -f /var/log/nginx/*.log' | grep checkin
 sudo podman logs -f epc-api | grep -iE 'checkin|register|id'
+# and the redis side:
+sudo podman exec epc-db redis-cli --scan --pattern 'device/*'
 ```
 
-So a working onboarding needs three things true at once: **agent + pipes up**
-(§8b), the **device reachable to the EPC's mDNS/opt-43** (§8c), and a **device
-identity the controller accepts** (§8d). The last one is why a *cross-flashed* AP
-(whose cert/serial still read as its original model) can reach the EPC and still
-be refused — see the cross-flash guide.
+So onboarding needs three things true at once: **agent + pipes up** (§8b), the
+**device reachable to the EPC's mDNS/opt-43** (§8c), and a **serial the controller
+knows** (§8d). The last is where a *cross-flashed* AP dies: it can present a
+**blank serial** (`sn=0000…`) if the foreign firmware can't read the board's
+factory serial, so it never matches a `device/<sn>` record — see the
+[cross-flash walkthrough](crossflash-ews377apv3-walkthrough.md) for reading and
+re-writing the serial (`setconfig -g/-s 19`).

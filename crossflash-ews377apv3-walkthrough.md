@@ -126,25 +126,60 @@ Findings from the rootfs: `admin`/`admin` (MD5-crypt `$1$jLKJRxCv$…`), `root`
 empty (but SSH off + empty-login blocked), no `/www` GUI, and the cloud agent
 logic in `/lib/cloud/minicloud-init.sh`.
 
-## 8. Adoption is the real work
+## 8. Adoption is the real work — the blank-serial trap (and the fix)
 
-Flashing is 90%; adoption is the other 90%. A cloud/FIT AP:
+Flashing is 90%; adoption is the other 90%. A cloud AP:
 
 1. **Discovers** the controller via mDNS (EPC `Minicloud_*._http._tcp` TXT →
-   `/api/v1/checkin` + `/device/register`), or via **DHCP option 43** (controller
+   `/api/v1/checkin` + `/device/register`), via **DHCP option 43** (controller
    IP), or `force_ac`.
-2. **Authenticates with mutual-TLS** — a **client cert from the per-device `cert`
-   MTD partition** (`/etc/ezmcloud/client.crt`). The controller derives the
-   device `id` from that cert.
+2. **Checks in** to `/api/v1/checkin` (server-auth TLS, `curl -k`), identifying
+   itself in a header.
 
-The catch: after a cross-flash the cert (and hardware serial / model code `X44`)
-still identify the box as **EWS377AP v3 / neutron**, while it's running cloud/FIT
-firmware. If the controller won't accept that cert-identity as a registered cloud
-device, check-in fails at auth — observed on an EPC as a `checkin key error:
-'id'` 404 loop, device never enrolling. **So a firmware-only crossflash can boot,
-reach the controller, and still not adopt.** The per-device cert/identity — not
-the image — is the final gate, the same lesson as the ENS620EXT `cert`-partition
-story.
+Capture one check-in (the AP connects with `-k`, so a self-signed TLS logger with
+an iptables redirect of just the AP works) and you see the exact problem:
+
+```
+POST /api/v1/checkin HTTP/1.1
+Kaiwoo-authentication: id=88:DC:97:04:44:07,timestamp=…,nonce=…,sn=00000000000000000000
+```
+
+**The `sn` is all zeros — a blank serial.** The EPC keys every device by serial:
+the check-in handler runs a Redis `HMGET device/<sn> secret`; no record →
+`DEVICE_NOT_FOUND`, surfaced as `handle_auth_request … checkin key error: 'id'`
+and a permanent `404` loop. `devices` never leaves `0`.
+
+Why blank: the cloud firmware reads its serial from **config field 19** —
+`/etc/init.d/swallow`: `serial_number=$(setconfig -g 19)`. On a cross-flashed
+board that field is empty (the EnSky/EWS firmware read the real serial fine; the
+ECW firmware reads a different location and gets zeros). **This — not the image —
+is the true adoption gate.**
+
+### The fix: give it a serial with `setconfig`
+
+`setconfig` writes the persistent factory config, which survives a firmware
+flash. So, while you have EWS access (from the factory-reset revert):
+
+```sh
+# generate a VALID serial with the target model code so the controller accepts
+# it as that model — X42 = ECW230v3 (Code27 check char; see serial-numbers.md)
+#   e.g. EPC1X4200011
+
+# on the EWS firmware (root via the SSH exec channel):
+setconfig -s 19 EPC1X4200011      # write serial to field 19
+setconfig -g 19                   # verify
+
+# then re-flash the (product_id-patched) ECW230v3 image; it now reads field 19
+# and presents EPC1X4200011 instead of zeros.
+```
+
+Register `EPC1X4200011` in the controller as an ECW230v3, and the check-in now
+matches → the AP adopts. **The model code in the serial matters**: give a cloud
+device an `X42` serial, not the hardware's original `X44` (EWS377AP v3 / neutron),
+so the controller treats it as the cloud model it's now running. This is the same
+"forge a serial with the right model code" idea as
+[serial-numbers](serial-numbers.md), applied to close the identity gap a
+firmware-only crossflash leaves open.
 
 ## 9. Reverting
 
