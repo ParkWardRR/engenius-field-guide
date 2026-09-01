@@ -57,5 +57,5 @@ flowchart TD
 
 | Route | What it does | When |
 |-------|-------------|------|
-| [Cross-flash](../firmware/cross-flashing.md) | Reflash the device to a hardware-equivalent Fit/ECW variant so the controller sees a supported model | Device is on the wrong firmware line ([equivalence table](../hardware/model-equivalence.md)) |
+| [Cross-flash](cross-flashing.md) | Reflash the device to a hardware-equivalent Fit/ECW variant so the controller sees a supported model | Device is on the wrong firmware line ([equivalence table](model-equivalence.md)) |
 | [Whitelist the model](add-unknown-models.md) | Add the model to the controller DB; device stays untouched | Device works but its model is just missing from the list |

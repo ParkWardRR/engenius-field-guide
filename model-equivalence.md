@@ -1,7 +1,7 @@
 # Hardware equivalence
 
 Models that share the same board can run each other's firmware — the basis for
-[cross-flashing](../firmware/cross-flashing.md). Same board ≠ identical: enclosure,
+[cross-flashing](cross-flashing.md). Same board ≠ identical: enclosure,
 ports, PoE, and per-device partitions can differ.
 
 ## Known equivalent groups
@@ -21,7 +21,7 @@ FCC ID.
 
 Practical use: an ENS620EXT can be moved toward the ECW160 (a Fit-Controller line)
 — but the missing `cert` partition means firmware alone won't register it; see
-[cross-flashing](../firmware/cross-flashing.md).
+[cross-flashing](cross-flashing.md).
 
 ### ECW230 (v3) ≈ EWS377-FIT ≈ EWS377AP v3
 
@@ -29,7 +29,7 @@ The ECW230v3, EWS377-FIT, and the ezMaster/EnSky-managed **EWS377AP v3** are the
 same Wi-Fi 6 4×4 board — cross-flashable siblings. Running EWS377-FIT firmware on
 ECW230 or EWS377AP v3 hardware moves it onto a local Fit Controller. Firmware
 product IDs: EWS377-FIT `300`, ECW230v3 `284`, EWS377AP v3 `282`
-([firmware-format](../firmware/firmware-format.md)).
+([firmware-format](firmware-format.md)).
 
 Caveat for the EWS377AP v3 → FIT direction: the v3's own web UI (LuCI
 `admin/system/flashops`) rejects a FIT `.bin` at upload — its header check gates
@@ -38,7 +38,7 @@ on `product_id`/`model`, and `300`/`EWS377-FIT` ≠ the expected `282`/`EWS377AP
 valid"*). Reaching FIT therefore needs either the vendor conversion package
 (`ews377apv3-5.1.4-1.zip`), a forced/patched header check, or a bootloader-level
 flash — not a plain web-UI upload. Per the encrypted-payload caveat in
-[firmware-format](../firmware/firmware-format.md), a re-headed image may still
+[firmware-format](firmware-format.md), a re-headed image may still
 not boot.
 
 ## Adding to this list
