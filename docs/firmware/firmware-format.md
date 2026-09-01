@@ -74,28 +74,45 @@ the check must be forced/patched. That header gate, plus per-device secrets like
 the [`cert` partition](cross-flashing.md), is what makes a crossflash more than
 just writing a `.bin`.
 
-## Integrity fields are proprietary (re-heading caveat)
+## Re-heading a donor image (what's actually checked)
 
-`mksenaofw` reads and re-encodes the header structure, but the **`md5sum` and
-`chksum` in stock EnGenius images are not reproducible** from the OpenWRT tool's
-formulas. Verified against `EWS377APv3-v3.9.3.2` and `ews377-fit-1.0.4-3`:
+What gates an upload is narrower than the header suggests. Confirmed by reading
+the live rootfs of an EWS377AP v3 (`/lib/upgrade/`, `/bin/header`) and running
+its own tools against a re-headed `ews377-fit-1.0.4-3` image:
 
-- `md5sum` (`0x28`) does **not** equal MD5 of the stored payload (`file[146:]`)
-  for any offset/length slice tested — the payload is **encrypted**, and the
-  hash is over the plaintext (computed pre-encryption / pre-header).
-- `chksum` (`0x58`) does **not** match a byte-sum of the header (± CAPWAP), nor a
-  16-bit one's-complement fold, nor a whole-image sum — the vendor uses a
-  checksum the public tool doesn't implement.
+**The upload check tests only `vendor_id` + `product_id`** (`check_senao_image_header`):
 
-Consequences for anyone trying to **re-head** a donor image (patch `product_id` +
-`model` so the target accepts it):
+```sh
+check_senao_image_header(){
+	local SN_VENDOR_ID=0101
+	local SN_PRODUCT_ID=011a          # 282 = EWS377AP v3
+	[ "$senao_vendor_id" = "$SN_VENDOR_ID" -a "$senao_product_id" = "$SN_PRODUCT_ID" ] && return 0
+	[ "$senao_magic_long" = "27051956" -o "$senao_magic_long" = "d00dfeed" ] && return 0
+	return 1
+}
+```
 
-- The donor `md5sum` stays valid *as long as you leave the payload untouched* —
-  it covers the payload, not the header you're editing.
-- You **cannot** recompute a vendor-valid `chksum` with public tooling. A pure
-  header patch only works if the target's upgrade check ignores `chksum` (only
-  gates on magic + `product_id` + `model` + `md5sum`). Confirm that in the
-  device's `senao_image_header_check` before relying on it.
-- Even an accepted re-headed image may not boot: the encrypted payload is
-  decrypted on-device, so a donor payload keyed to a different model can fail to
-  decrypt/boot. This is a separate failure mode from the header gate.
+Not the `model` string, **not** `md5sum`, **not** `chksum`. So to make a donor
+image accepted, patch **only** `product_id` at `0x08` to the target's value
+(e.g. `300 → 282`, two bytes). `vendor_id` is already `257` across the line.
+`senao_image_header_check` also rejects `firmware_type == 0` images whose
+`firmware_ver` major is `3` and minor `< 7`.
+
+**`md5sum` / `chksum` are still not reproducible via `mksenaofw`** (verified: the
+stored values match no payload-MD5 slice nor any header byte-sum/fold) — but you
+don't need to recompute them:
+
+- `md5sum` covers the **payload**, so a `product_id`-only header patch leaves it
+  valid. The on-device de-wrap tool **`/bin/header -x`** re-checks it and prints
+  `MD5 check OK!` on a patched image — proof the hash is payload-scoped.
+- `chksum` is **not read** by the upgrade path at all, so its opacity doesn't
+  matter.
+
+**The payload is obfuscated with a universal (not per-model) key.** `sysupgrade`
+runs `header -x` on any image whose first-4-byte magic is `00000000`; that strips
+the 146-byte header and de-obfuscates the payload into a plain **FIT** (`d00dfeed`).
+A FIT-model payload de-wraps cleanly on EWS377AP v3 hardware, so cross-model
+decryption is **not** a failure mode here (it can be on lines that lack the tool
+or use keyed images). After de-wrap, `platform_check_image` requires that FIT to
+carry the board's mandatory sections — trivially true between same-board siblings
+(see [model-equivalence](../hardware/model-equivalence.md)).
