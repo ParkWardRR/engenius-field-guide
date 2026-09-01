@@ -44,6 +44,17 @@ ECS2512/ECS2512FP are present. An unlisted model is refused even if it would wor
 
 ## Two workarounds
 
+```mermaid
+flowchart TD
+    A["Controller won't adopt a device"] --> B{"Device works,<br/>just not on the list?"}
+    B -->|Yes| C["Whitelist the model<br/>in Mongo + sync Redis"]
+    B -->|"No — wrong firmware line"| D{"Hardware-equivalent<br/>Fit/ECW sibling?"}
+    D -->|Yes| E["Cross-flash to the sibling"]
+    D -->|No| F["Not supported"]
+    C --> G(["Device adopted"])
+    E --> G
+```
+
 | Route | What it does | When |
 |-------|-------------|------|
 | [Cross-flash](../firmware/cross-flashing.md) | Reflash the device to a hardware-equivalent Fit/ECW variant so the controller sees a supported model | Device is on the wrong firmware line ([equivalence table](../hardware/model-equivalence.md)) |

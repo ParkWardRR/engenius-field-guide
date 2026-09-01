@@ -25,6 +25,28 @@ Compose stack**. Images live on **AWS public ECR** (no auth):
 | `epc-otter` | 58 MB | Background worker | — |
 | `epc-radius` | 23 MB | FreeRADIUS (802.1X / CoA) | 1812-1813/udp, 18120, 3799/udp |
 
+```mermaid
+flowchart TB
+    USER["Browser / EnGenius devices"]
+    subgraph host["AlmaLinux host — Podman"]
+        RAC["epc-raccoon<br/>portal :80"]
+        API["epc-api<br/>nginx + gunicorn<br/>:8080 :443"]
+        RAD["epc-radius<br/>1812-1813, 18120, 3799"]
+        OT["epc-otter<br/>worker"]
+        MD["epc-mdns<br/>host net"]
+        DB["epc-db<br/>MongoDB + Redis"]
+        SOCK[/"podman.sock = docker.sock"/]
+    end
+    USER --> RAC
+    USER --> API
+    RAC --> DB
+    API --> DB
+    OT --> DB
+    RAD --> API
+    RAD --> DB
+    API -. "manages the stack" .-> SOCK
+```
+
 Images are **amd64 only** — EPC does not support ARM.
 
 Hardcoded host paths (from the shipped `docker-compose.yml`):

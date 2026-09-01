@@ -27,6 +27,16 @@ Map of EnGenius's WiFi product families and which controller runs them.
 - **ezMaster** → older managed **EWS/ENS/ENH** (EOL).
 - **Fit Controller / EPC** → **-FIT**, **ECW**, **ECS/ECS-Lite**.
 
+```mermaid
+flowchart LR
+    EWS["EWS managed APs"] --> EZ["ezMaster (EOL)"]
+    ENS["ENS / ENH APs"] --> EZ
+    FIT["-FIT variants"] --> FC["Fit Controller / EPC"]
+    ECS["ECS / ECS-Lite switches"] --> FC
+    ECW["ECW cloud APs"] --> CLOUD["EnGenius Cloud"]
+    ECW -.->|since early 2024| FC
+```
+
 Full compatibility story and workarounds: [controllers/landscape](controllers/landscape.md).
 
 ## Why hardware equivalence matters
