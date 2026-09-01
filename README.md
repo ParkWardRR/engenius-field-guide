@@ -57,11 +57,12 @@ Fully worked, evidence-based, start-to-finish:
 
 - **[Cross-flash an EWS377AP v3 → Cloud/FIT](crossflash-ews377apv3-walkthrough.md)** —
   the one-field `product_id` re-head, how to get root past the restricted CLI,
-  flashing, reading firmware off-box, and why *adoption* (mutual-TLS device cert)
-  is the real gate.
+  flashing, reading firmware off-box, and why *adoption* (the blank-serial trap —
+  the controller keys devices by serial, and a crossflash reports `sn=0000`) is
+  the real gate.
 - **[EPC on Podman/AlmaLinux](epc-podman-almalinux.md)** — the full 7-container
   deploy, the Docker-socket → podman-socket port, SELinux Enforcing, and (§8) the
-  device-onboarding agent + pipes + the mTLS check-in flow.
+  device-onboarding agent + pipes + the serial-keyed check-in flow.
 
 ## Start here
 
