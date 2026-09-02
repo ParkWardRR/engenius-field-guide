@@ -254,7 +254,13 @@ often just this: same device, new MAC, new lease. A managed switch's MAC table
 
 If the active slot won't boot, USB-TTL 3.3 V (GND↔GND, adapter RX↔AP TX, adapter
 TX↔AP RX, **no VCC** — it's PoE-powered), 115200 8N1. Interrupt the boot
-countdown to reach the u-boot prompt, then:
+countdown to reach the u-boot prompt.
+
+**Back up flash first.** Env corruption is recoverable; **ART corruption is a real
+brick** (RF calibration + factory MACs). Before any further env edits, dump the
+critical MTDs (`/proc/mtd`: env = "APPSBLENV", bootloader/defaults = "APPSBL",
+calibration = "ART") and copy them off-box, and keep pristine *unpatched* stock
+bins as the rollback path.
 
 ```
 env default -a        # restore the COMPLETE default env -> the slot boots again
@@ -262,11 +268,31 @@ saveenv
 reset
 ```
 
-Then set your real identity the safe way (single fields), verify `fw_printenv`
-shows a complete env (`bootcmd=bootipq`) *before* rebooting, and re-flash as
-needed. A plain power-cycle does **not** help (same bad saved env); the
-dual-image boot-count failsafe also won't trigger if the env can't persist the
-counter. UART is the reliable path back.
+Then, once it boots (root via SSH :8822):
+
+- `fw_printenv > env_backup.txt` — snapshot the known-good baseline.
+- Check A/B failover is intact: `fw_printenv | grep -iE 'bootcount|bootlimit|altbootcmd'`.
+  Their absence is exactly why a plain power-cycle / boot-count failsafe won't
+  auto-recover the other slot (u-boot's [bootcount](https://docs.u-boot.org/en/latest/api/bootcount.html)
+  mechanism can't persist) — restore them from a sibling AP's env if missing.
+- Restore identity the safe way (single `fw_setenv` fields, never rebuild): set
+  `ethaddr` **and** the LAN/WAN/WLAN MAC fields (`setconfig -g 6/7/8`) — verify
+  each against the ART value, since cloud firmware may key an interface MAC off a
+  field other than LAN. Then `snextra` (the 20-char serial). `fw_printenv` and
+  confirm a complete env (`bootcmd=bootipq`) **before** rebooting.
+
+Two check-in false-negatives to rule out *before* blaming the serial/DB:
+
+- **Clock skew.** The check-in `Kaiwoo-authentication` carries a `timestamp`, and
+  the controller rejects anything **older than ~900 s (15 min)** with a distinct
+  `460 INVALID_TIMESTAMP` — not the 404 serial error. A bootloader wipe can reset
+  the clock; confirm NTP/time before the first check-in.
+- **Reachability.** Confirm the AP can actually reach the controller
+  (`curl -vk https://<controller>:443/`) — a MAC change from the env wipe can move
+  its DHCP IP, so don't assume it landed where you expect.
+
+A plain power-cycle does **not** help (same bad saved env). UART is the reliable
+path back.
 
 ## 10. Reverting
 
