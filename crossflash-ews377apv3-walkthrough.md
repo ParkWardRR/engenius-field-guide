@@ -278,6 +278,15 @@ If the active slot won't boot, USB-TTL 3.3 V (GND↔GND, adapter RX↔AP TX, ada
 TX↔AP RX, **no VCC** — it's PoE-powered), 115200 8N1. Interrupt the boot
 countdown to reach the u-boot prompt.
 
+**The console header (EWS377AP v3 board):** the 4-pin header silkscreened
+**`J2 UART`** near the bottom-center edge (by `U9/U16/U17`), pads labeled
+individually **`V G T R`** = VCC / GND / TX / RX. Wire **G→GND, T→adapter RX,
+R→adapter TX**, leave **V** open. There is a **second `UART_BT` header right next
+to it — that's Bluetooth, not the console; don't use it.** An **isolated** USB-TTL
+adapter is worth it here since the board runs on ~54 V PoE. Power the board via
+its RJ45 (PoE) with the case open; the DC barrel jack is a high-voltage input —
+don't guess a voltage there.
+
 **Back up flash first.** Env corruption is recoverable; **ART corruption is a real
 brick** (RF calibration + factory MACs). Before any further env edits, dump the
 critical MTDs (`/proc/mtd`: env = "APPSBLENV", bootloader/defaults = "APPSBL",
