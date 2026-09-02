@@ -219,6 +219,17 @@ hardware's original `X44`, so the controller treats it as the model it's now
 running. Same "forge a serial with the right model code" idea as
 [serial-numbers](serial-numbers.md).
 
+> **Prefer the supported path if you can.** A fabricated `snextra` is an
+> *internal, unsupported* identity — treat it as a system with controls (unique
+> per device, derived deterministically from the label MAC/serial, collision-
+> checked against the controller before registering), not a reusable string.
+> And note that **EWS377-FIT firmware (≥ v1.1.65) lists EnGenius Private Cloud
+> support** and carries later security fixes — so cross-flashing to **FIT
+> (`product_id 300`)** can let a controller adopt the AP by its **real serial**,
+> no spoofing or env-editing. If your controller/licensing supports FIT
+> onboarding, that's the lower-risk route; the cloud/`snextra` path above is for
+> when it doesn't.
+
 ## 9. ⚠️ The u-boot env is a bricking hazard — the two-part trap
 
 Two mistakes here turned a running AP into one stuck at the bootloader. Both are
@@ -262,10 +273,21 @@ critical MTDs (`/proc/mtd`: env = "APPSBLENV", bootloader/defaults = "APPSBL",
 calibration = "ART") and copy them off-box, and keep pristine *unpatched* stock
 bins as the rollback path.
 
+**Gate the persist — don't blind-save.** `env default -a` loads defaults into
+**RAM only**; `saveenv` (`env save`) is the separate write to flash. Inspect the
+candidate *before* writing, and prove the write survived:
+
 ```
-env default -a        # restore the COMPLETE default env -> the slot boots again
-saveenv
-reset
+printenv                                   # 1. capture the current (bad) env + console log
+version ; help env                         #    confirm this u-boot supports `env default`
+env default -a                             # 2. load defaults into RAM only
+printenv bootcmd active_fw rootfsname ethaddr sn snextra   # 3. INSPECT the candidate
+printenv bootlimit bootcount altbootcmd
+# 4. STOP if: `env default` errors / too few vars; or bootcmd/active_fw/rootfsname
+#    absent; or defaults look wrong for this vendor's flow. (vendor-modified u-boot)
+env save                                   # 5. persist ONLY after the gate passes
+env load ; printenv bootcmd active_fw ethaddr   # 6. PROVE persistence, don't assume
+reset                                      # 7. boot once (explicit boot cmd if understood)
 ```
 
 Then, once it boots (root via SSH :8822):
