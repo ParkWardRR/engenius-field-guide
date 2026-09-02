@@ -9,7 +9,7 @@ ezMaster-era AP onto a Fit/ECW line the modern controller supports.
 ## When it works
 
 Only between models that share hardware — see
-[model-equivalence](../hardware/model-equivalence.md). Even then, matching the OS
+[model-equivalence](model-equivalence.md). Even then, matching the OS
 image isn't always enough (see the `cert` partition below).
 
 ## Levels of difficulty

@@ -168,8 +168,8 @@ creating the admin account through that sign-up page.
    `/epc/pipe/fitdog`; over SSH it keeps the channel open and looks like a hang.
    Redirect the installer's output to a file and/or background it.
 3. **`.agent` env is not created**, so the `epc-agent` (device-onboarding)
-   compose is skipped. The controller UI works without it; revisit before
-   onboarding devices.
+   compose is skipped. The controller UI works without it, but **devices cannot
+   onboard until it (plus the pipes + `fitdog`) are running** — see §8.
 4. **SELinux — hardened to Enforcing.** The vendor compose won't run Enforcing
    (no volume labels, socket mounted without `label=disable`). The fix, verified
    working with **0 AVC denials across a reboot**:
@@ -199,3 +199,80 @@ creating the admin account through that sign-up page.
 - Installer: `http://engenius-epc.s3.us-west-2.amazonaws.com/dev/1.8.8/epc.sh`
 - Package (compose + configs): `.../1.8.8/epc-pkg.tar.gz`
 - Docs: https://doc.engenius.ai/home-epc-quick-start-guide
+
+## 8. Device onboarding — the agent, the pipes, and the mTLS gate
+
+This is the part a bare `podman-compose up` silently drops, and without it
+`db.devices.count()` stays **0** no matter what the AP does. Evidence and fix:
+
+### 8a. What the missing pieces are
+
+The vendor `epc.sh` runs a *second* compose project (`agent.yml`) plus a
+host-side pipe servicer that the main compose doesn't:
+
+- **`epc-agent`** — host-network container, mounts `/epc` + the Docker socket.
+  Handles software/OCU updates, `/etc/hosts` replica-set names, and host-command
+  requests from the other containers.
+- **`fitdog` → `host.sh`** — a host loop that reads `req_id;;cmd` from
+  `/epc/pipe/host` and `eval`s it on the host (container→host command bridge),
+  replying on `resp_<id>`. `host.sh` ships inside the `epc-pkg.tar.gz` and the
+  `epc-agent` image (`/app/host.sh`).
+
+### 8b. Bring them up (Podman)
+
+```bash
+# named pipes + host servicer
+sudo systemctl start podman.socket
+for p in req msg host host_msg; do [ -p /epc/pipe/$p ] || sudo mkfifo /epc/pipe/$p; done
+sudo cp <epc-pkg>/host.sh /epc/pipe/host.sh; sudo chmod +x /epc/pipe/host.sh /epc/pipe/fitdog
+sudo sh -c 'nohup /epc/pipe/fitdog >/var/log/epc/fitdog.log 2>&1 &'   # -> host.sh
+
+# the agent (docker.sock -> podman.sock; label=disable for the socket)
+sudo mkdir -p /var/log/epc/agent
+sudo podman run -d --replace --name epc-agent --network host --restart always \
+  -v /epc:/epc:z -v /var/log/epc/agent:/var/log/epc:z \
+  -v /run/podman/podman.sock:/var/run/docker.sock:z --security-opt label=disable \
+  -e REPOSITORY_URI=public.ecr.aws/d3g4m7o9/ -e VERSION=1.8.8 -e HOST_IP=<vm-ip> \
+  public.ecr.aws/d3g4m7o9/epc-agent:1.8.8 /start-agent.sh
+```
+
+Healthy agent logs: `epc Agent Starting…` / `EPC is not HA mode.`
+
+### 8c. How a device finds the EPC
+
+The EPC advertises itself by **mDNS**: `epc-mdns` announces
+`Minicloud_<id>._http._tcp.local` with a TXT record carrying the onboarding URLs
+(`checkin_scheme=https checkin_port=443 checkin_path=/api/v1/checkin`,
+`raccoon_port=80 raccoon_register_path=/device/register`, `project=epc`). A
+cloud/FIT AP on the same L2 hears it and check-ins. Cross-subnet, hand it the
+controller with **DHCP option 43 = the EPC IP** (raw 4-byte address) — EnGenius's
+`udhcpc` exposes it as `acaddr` and writes it to `/tmp/dhcp_option`
+(`force_ac` > `dhcp_ac` > mDNS is the AP's resolution order).
+
+### 8d. The auth gate (why check-ins can 404 forever)
+
+The device identifies itself in a header, not a client cert (the EPC does **not**
+send a `CertificateRequest` on `/api/v1/checkin`):
+
+```
+Kaiwoo-authentication: id=<mac>,timestamp=…,nonce=…,sn=<serial>
+```
+
+`epc-api` keys the device by **serial**: a Redis Lua `HMGET device/<sn> secret` —
+no record ⇒ `DEVICE_NOT_FOUND`, surfaced as `handle_auth_request … checkin key
+error: 'id'` and a 4xx loop. Watch it live:
+
+```bash
+sudo podman exec epc-api sh -c 'tail -f /var/log/nginx/*.log' | grep checkin
+sudo podman logs -f epc-api | grep -iE 'checkin|register|id'
+# and the redis side:
+sudo podman exec epc-db redis-cli --scan --pattern 'device/*'
+```
+
+So onboarding needs three things true at once: **agent + pipes up** (§8b), the
+**device reachable to the EPC's mDNS/opt-43** (§8c), and a **serial the controller
+knows** (§8d). The last is where a *cross-flashed* AP dies: it can present a
+**blank serial** (`sn=0000…`) if the foreign firmware can't read the board's
+factory serial, so it never matches a `device/<sn>` record — see the
+[cross-flash walkthrough](crossflash-ews377apv3-walkthrough.md) for reading and
+re-writing the serial (`setconfig -g/-s 19`).

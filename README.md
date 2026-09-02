@@ -35,46 +35,61 @@ missing manual: tested, no-fluff, straight to the commands.
 🖥️ **Run the controller yourself.** Deploy EnGenius Private Cloud (EPC) as
 Podman containers on AlmaLinux — hardened, SELinux **Enforcing**, reboot-proof —
 or run the Fit Controller stack on a Raspberry Pi. No appliance, no cloud.
-→ [EPC on Podman/AlmaLinux](docs/controllers/epc-podman-almalinux.md) ·
-[Fit Controller on ARM](docs/controllers/self-hosting-fitcon-arm.md)
+→ [EPC on Podman/AlmaLinux](epc-podman-almalinux.md) ·
+[Fit Controller on ARM](self-hosting-fitcon-arm.md)
 
 📡 **Adopt devices the controller rejects.** That "unsupported" AP usually works
 fine — the controller just doesn't have it whitelisted. Add the model to its
 database, or cross-flash the device to a supported sibling.
-→ [Whitelist a model](docs/controllers/add-unknown-models.md) ·
-[Cross-flashing](docs/firmware/cross-flashing.md)
+→ [Whitelist a model](add-unknown-models.md) ·
+[Cross-flashing](cross-flashing.md) ·
+[EWS377AP v3 → Cloud/FIT walkthrough](crossflash-ews377apv3-walkthrough.md)
 
 🔧 **Go under the hood.** Decode or forge serials (the Code27 checksum), read the
 Senao firmware header, and reach the controller's MongoDB/Redis directly.
-→ [Serial numbers](docs/firmware/serial-numbers.md) ·
-[Firmware format](docs/firmware/firmware-format.md) ·
-[Backend access](docs/controllers/backend-access.md)
+→ [Serial numbers](serial-numbers.md) ·
+[Firmware format](firmware-format.md) ·
+[Backend access](backend-access.md)
+
+## Two deep-dive walkthroughs
+
+Fully worked, evidence-based, start-to-finish:
+
+- **[Cross-flash an EWS377AP v3 → Cloud/FIT](crossflash-ews377apv3-walkthrough.md)** —
+  the one-field `product_id` re-head, how to get root past the restricted CLI,
+  flashing, reading firmware off-box, and why *adoption* (the blank-serial trap —
+  the controller keys devices by serial, and a crossflash reports `sn=0000`) is
+  the real gate.
+- **[EPC on Podman/AlmaLinux](epc-podman-almalinux.md)** — the full 7-container
+  deploy, the Docker-socket → podman-socket port, SELinux Enforcing, and (§8) the
+  device-onboarding agent + pipes + the serial-keyed check-in flow.
 
 ## Start here
 
 | Your goal | Go to |
 |-----------|-------|
-| Self-host a controller | [landscape](docs/controllers/landscape.md) → [EPC on x86](docs/controllers/epc-podman-almalinux.md) or [Fit Controller on ARM](docs/controllers/self-hosting-fitcon-arm.md) |
-| Adopt a device the controller rejects | [whitelist the model](docs/controllers/add-unknown-models.md) or [cross-flash it](docs/firmware/cross-flashing.md) |
-| Decode/generate a serial | [serial-numbers](docs/firmware/serial-numbers.md) |
-| Understand product lines / shared hardware | [overview](docs/overview.md), [model-equivalence](docs/hardware/model-equivalence.md) |
+| Self-host a controller | [landscape](landscape.md) → [EPC on x86](epc-podman-almalinux.md) or [Fit Controller on ARM](self-hosting-fitcon-arm.md) |
+| Adopt a device the controller rejects | [whitelist the model](add-unknown-models.md) or [cross-flash it](crossflash-ews377apv3-walkthrough.md) |
+| Decode/generate a serial | [serial-numbers](serial-numbers.md) |
+| Understand product lines / shared hardware | [overview](overview.md), [model-equivalence](model-equivalence.md) |
 
 ## All docs
 
 | Doc | Covers |
 |-----|--------|
-| [overview](docs/overview.md) | Product lines and which controller manages what |
-| [controllers/landscape](docs/controllers/landscape.md) | ezMaster vs Fit Controller/EPC; device compatibility |
-| [controllers/epc-podman-almalinux](docs/controllers/epc-podman-almalinux.md) | EPC 1.8.8 as Podman containers on AlmaLinux |
-| [controllers/self-hosting-fitcon-arm](docs/controllers/self-hosting-fitcon-arm.md) | Fit Controller stack on ARM / Raspberry Pi |
-| [controllers/backend-access](docs/controllers/backend-access.md) | MongoDB + Redis access |
-| [controllers/add-unknown-models](docs/controllers/add-unknown-models.md) | Whitelist an unsupported model |
-| [controllers/custom-https-cert](docs/controllers/custom-https-cert.md) | Replace the controller's TLS cert |
-| [firmware/serial-numbers](docs/firmware/serial-numbers.md) | Serial format + Code27 check char |
-| [firmware/model-codes](docs/firmware/model-codes.md) | Known 3-char model codes |
-| [firmware/firmware-format](docs/firmware/firmware-format.md) | Senao image header, mksenaofw, validation |
-| [firmware/cross-flashing](docs/firmware/cross-flashing.md) | Flashing foreign firmware: method + risks |
-| [hardware/model-equivalence](docs/hardware/model-equivalence.md) | Which models share hardware |
+| [overview](overview.md) | Product lines and which controller manages what |
+| [landscape](landscape.md) | ezMaster vs Fit Controller/EPC; device compatibility |
+| [epc-podman-almalinux](epc-podman-almalinux.md) | EPC 1.8.8 as Podman containers on AlmaLinux (incl. device onboarding) |
+| [self-hosting-fitcon-arm](self-hosting-fitcon-arm.md) | Fit Controller stack on ARM / Raspberry Pi |
+| [backend-access](backend-access.md) | MongoDB + Redis access |
+| [add-unknown-models](add-unknown-models.md) | Whitelist an unsupported model |
+| [custom-https-cert](custom-https-cert.md) | Replace the controller's TLS cert |
+| [serial-numbers](serial-numbers.md) | Serial format + Code27 check char |
+| [model-codes](model-codes.md) | Known 3-char model codes |
+| [firmware-format](firmware-format.md) | Senao image header, mksenaofw, validation |
+| [cross-flashing](cross-flashing.md) | Flashing foreign firmware: reference (method + risks) |
+| [crossflash-ews377apv3-walkthrough](crossflash-ews377apv3-walkthrough.md) | Full worked EWS377AP v3 → Cloud/FIT conversion |
+| [model-equivalence](model-equivalence.md) | Which models share hardware |
 | [examples/epc-podman/](examples/epc-podman/) | Podman compose + env template |
 
 ## Scope
@@ -87,7 +102,7 @@ flashing (it can brick hardware).
 ## Contributing
 
 Corrections and additions welcome — especially verified
-[model codes](docs/firmware/model-codes.md) and hardware-equivalence pairs. Open
+[model codes](model-codes.md) and hardware-equivalence pairs. Open
 an issue or PR.
 
 ## License

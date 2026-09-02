@@ -1,7 +1,7 @@
 # Whitelisting an unknown model
 
 Make the controller adopt a device whose model isn't in its default list — the
-non-invasive alternative to [cross-flashing](../firmware/cross-flashing.md). Edits
+non-invasive alternative to [cross-flashing](cross-flashing.md). Edits
 the controller, not the device.
 
 The controller keeps known models in Mongo's `models` collection and mirrors them
@@ -13,7 +13,7 @@ into Redis. Add the model to Mongo, then sync to Redis.
 |-------|---------|
 | `type` | `"ap"` or `"switch"` |
 | `name` | display name |
-| `number` | 3-char [model code](../firmware/model-codes.md) |
+| `number` | 3-char [model code](model-codes.md) |
 | `band` | e.g. `"2_4G\|5G"` |
 | `category` | e.g. `"indoor"` |
 | `ports` | array (switches); each `Port` has `id`, `poe_type`, `speed_cap` |
