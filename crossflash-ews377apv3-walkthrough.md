@@ -228,7 +228,18 @@ running. Same "forge a serial with the right model code" idea as
 > (`product_id 300`)** can let a controller adopt the AP by its **real serial**,
 > no spoofing or env-editing. If your controller/licensing supports FIT
 > onboarding, that's the lower-risk route; the cloud/`snextra` path above is for
-> when it doesn't.
+> when it doesn't. Test it the vendor's way: FIT on-prem management needs the
+> **controller and AP on the same Layer-2 network** (matching subnet ≠ L2), then
+> Pending-Approval → Register → Assign → **Pairing** — don't assume your cloud
+> `force_ac` logic transfers, and pin the AP-firmware/controller/API versions
+> before trusting an upgrade (some FIT upgrades reset the admin password / drop
+> the AP offline).
+
+**One more caveat: a clean boot + adoption proves the *management plane* only, not
+equal RF.** Same board ≠ same regulatory policy — diff country code, channel list,
+DFS, configured-vs-effective Tx power, channel width, and radio/BSSID MACs, plus
+real client behavior (WPA2/WPA3, IoT, 2.4 GHz-only, throughput) **before vs after**
+conversion before you trust a converted AP on-air.
 
 ## 9. ⚠️ The u-boot env is a bricking hazard — the two-part trap
 
@@ -289,6 +300,12 @@ env save                                   # 5. persist ONLY after the gate pass
 env load ; printenv bootcmd active_fw ethaddr   # 6. PROVE persistence, don't assume
 reset                                      # 7. boot once (explicit boot cmd if understood)
 ```
+
+`env load` only proves the current session. Some u-boot builds keep a **redundant**
+env (primary/secondary) — restoring one can "work" until a later boot picks the
+other. So after `saveenv`, do a **full power removal** (PoE off long enough to
+discharge, then on), **with UART still attached** — a boot that "works" over the
+network can still show missing vars / fallback paths / NAND warnings on the console.
 
 Then, once it boots (root via SSH :8822):
 
