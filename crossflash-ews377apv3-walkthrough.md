@@ -80,18 +80,43 @@ de-wraps fine on v3 hardware.
 
 ## 4. Getting in to do it
 
-Telnet (23) and SSH (22, once enabled) both land in a **restricted CLI**
-(`ews377apv3>`). Escape it with the **SSH exec channel**, which runs as `uid=0`
-via `/bin/ash`:
+> **The single biggest gotcha: on the EnSky/EWS build, SSH listens on port
+> `8822`, not 22.** `etc/config/dropbear` has `option Port '8822'` (and
+> `ssh_tunnel_port '8822'` in `ezmcloud`). Scanning port 22 shows "connection
+> refused" and sends you down a rabbit hole thinking SSH is disabled — it isn't.
+
+Telnet (23) lands in a **restricted CLI** that on newer builds is fully locked
+("Please use 'Cloud GUI' to manage"). The way in is the **SSH exec channel on
+:8822**, which runs as `uid=0`:
 
 ```sh
-ssh -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+ssh -p 8822 -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa \
     root@<ap> 'id; cat /lib/upgrade/check_senao_image_header.sh'
 ```
 
-SSH user is `root`, password = the **web admin** password. The web LuCI login
-hashes `hex_md5(password + "\n")`; protected POSTs first arm a token via
-`GET admin/system/ajax_setCsrf`.
+SSH user is `root`, password = the **web admin** password (default `admin`). The
+web LuCI login hashes `hex_md5(password + "\n")`; **the POST fields are
+`username` + `password`** (not `luci_*`), and a valid login 302-redirects with a
+`stok`. Protected POSTs first arm a token via `GET admin/system/ajax_setCsrf`.
+The EWS web often force-redirects to **HTTPS** after the first apply.
+
+**Cloud/FIT firmware has no shell** — but when *unadopted* it serves a local
+React GUI with a JSON API (`admin`/`admin`), which is enough to point it at a
+controller and to flash, with no shell at all:
+
+```sh
+TOK=$(curl -s -X POST http://<ap>/api/sys/login -H 'Content-Type: application/json' \
+      -d '{"username":"admin","password":"admin"}' | jq -r .data.token)
+curl -s http://<ap>/api/sys/sys_info -H "Authorization: Bearer $TOK"    # serial, mac, fw
+curl -s -X POST http://<ap>/api/mgm/force_ac -H "Authorization: Bearer $TOK" \
+     -H 'Content-Type: application/json' -d '{"ip":"<controller-ip>"}'  # set controller
+curl -s -X POST http://<ap>/api/sys/apply -H "Authorization: Bearer $TOK" -d '{}'
+# local flash: POST /cgi-bin/upload.cgi (multipart field `file`, Bearer) ->
+#   GET /api/mgm/local_upgrade_image (validate) ->
+#   POST /api/mgm/fw_upgrade {"mode":"Upgrade_locally"}   (bare {} = OTA no-op)
+```
+The GUI's diagnostic tools (`/api/mgm/tools/ping` …) strictly validate the target
+as an IP, so there's **no command-injection shortcut** to a shell there.
 
 ## 5. Flashing
 
@@ -144,44 +169,106 @@ POST /api/v1/checkin HTTP/1.1
 Kaiwoo-authentication: id=88:DC:97:xx:xx:xx,timestamp=…,nonce=…,sn=00000000000000000000
 ```
 
-**The `sn` is all zeros — a blank serial.** The EPC keys every device by serial:
-the check-in handler runs a Redis `HMGET device/<sn> secret`; no record →
-`DEVICE_NOT_FOUND`, surfaced as `handle_auth_request … checkin key error: 'id'`
-and a permanent `404` loop. `devices` never leaves `0`.
+**The `sn` is all zeros — a blank serial.** How the EPC check-in handler
+(`routers/checkin.pyc :: handle_auth_request`, `pkg/general/chicken.pyc`) uses it:
+
+1. **Match is by serial:** `device = Device.objects(serial_number=<sn>).first()`.
+   `None` → `add_pending_device(mac, sn)` → HTTP `404` "Device Is Not Register".
+   **A blank serial is silently skipped by `add_pending_device`** — so it never
+   even shows up in the controller's "Pending Approval" list.
+2. The **Redis operational key is `device/<mac_lower>`** (the serial is only the
+   mongo match key). Reads `secret`, `falcon_nid`, `org_id`, etc.
+3. The `Kaiwoo-signature` is HMAC-SHA256, verified by `valid_signature`
+   (per-device `secret`) **OR `valid_signature_ex` (a global `DEFAULT_PRESHARED_KEY`)**.
+   The `_ex`/default-key path is the new-device bootstrap: a device with no
+   per-device secret still passes, so you don't need to know a per-device key.
+4. Model is resolved from the serial's 3-char model code via the `models`
+   collection (`{name: ECW230v3, number: X42}`).
 
 Why blank: the cloud firmware reads its serial from **config field 19** —
-`/etc/init.d/swallow`: `serial_number=$(setconfig -g 19)`. On a cross-flashed
-board that field is empty (the EnSky/EWS firmware read the real serial fine; the
-ECW firmware reads a different location and gets zeros). **This — not the image —
-is the true adoption gate.**
+`/etc/init.d/swallow`: `serial_number=$(setconfig -g 19)` — the "extra serial",
+a **20-character** field that ships empty on a cross-flashed board. **This — not
+the image — is the true adoption gate.**
 
-### The fix: give it a serial with `setconfig`
+### The fix: write field 19 with `fw_setenv` (the SAFE way)
 
-`setconfig` writes the persistent factory config, which survives a firmware
-flash. So, while you have EWS access (from the factory-reset revert):
+Field 19 lives in the u-boot env (mtd7 "APPSBLENV"). `fw_setenv`, `fw_printenv`,
+and `setconfig -g/-s` all operate on the same env and are mutually consistent —
+and `fw_setenv` writes a proper CRC. Use it. The value must be **exactly 20
+chars** with the target model code at positions 5–7 (`X42` = ECW230v3):
 
 ```sh
-# generate a VALID serial with the target model code so the controller accepts
-# it as that model — X42 = ECW230v3 (Code27 check char; see serial-numbers.md)
-#   e.g. EPC1X4200011
-
-# on the EWS firmware (root via the SSH exec channel):
-setconfig -s 19 EPC1X4200011      # write serial to field 19
-setconfig -g 19                   # verify
-
-# then re-flash the (product_id-patched) ECW230v3 image; it now reads field 19
-# and presents EPC1X4200011 instead of zeros.
+# on the EWS firmware, root via SSH :8822
+fw_setenv snextra EPC1X420000000000000     # 20 chars, X42 at pos 5-7
+setconfig -g 19                            # verify (reads the same env)
+# the value survives a firmware flash (env is separate from rootfs), so re-flash
+# the (product_id-patched) ECW230v3 image and it now presents EPC1X420000000000000.
 ```
 
-Register `EPC1X4200011` in the controller as an ECW230v3, and the check-in now
-matches → the AP adopts. **The model code in the serial matters**: give a cloud
-device an `X42` serial, not the hardware's original `X44` (EWS377AP v3 / neutron),
-so the controller treats it as the cloud model it's now running. This is the same
-"forge a serial with the right model code" idea as
-[serial-numbers](serial-numbers.md), applied to close the identity gap a
-firmware-only crossflash leaves open.
+> ⚠️ **Do NOT use `setconfig -s 19 …` casually, and never `setconfig -a 5`
+> without a valid temp file.** `setconfig`'s set path is a temp-file workflow
+> (`-a 1` copy flash→`/var/uboot_config`, `-a 2 -s N -d val` edit, then commit);
+> **`setconfig -a 5` with no temp reads STDIN straight into `/dev/mtd7` and
+> ERASES the whole u-boot env.** See §9 for why that (and the "recovery" after
+> it) can stop the AP from booting.
 
-## 9. Reverting
+Register that serial in the controller as an ECW230v3, and the check-in matches →
+the AP adopts (validated via the `DEFAULT_PRESHARED_KEY` bootstrap). **The model
+code in the serial matters** — give a cloud device an `X42` serial, not the
+hardware's original `X44`, so the controller treats it as the model it's now
+running. Same "forge a serial with the right model code" idea as
+[serial-numbers](serial-numbers.md).
+
+## 9. ⚠️ The u-boot env is a bricking hazard — the two-part trap
+
+Two mistakes here turned a running AP into one stuck at the bootloader. Both are
+easy to avoid once you know them.
+
+**Part 1 — wiping the env.** `setconfig -a 5` with no temp file wrote empty STDIN
+to `/dev/mtd7`, erasing every field (serial, product id, MACs). The device kept
+running (values were already loaded), but a reboot now had no saved env.
+
+**Part 2 — the fatal "fix".** Rebuilding the env with a **valid but incomplete**
+set of vars (`fw_setenv bootcmd bootipq; active_fw 0; sn; snextra`) is *worse*
+than leaving it erased. Rule:
+
+- **Erased/invalid env → SAFE.** u-boot falls back to the **complete compiled
+  default env** baked into the APPSBL (mtd8: `bootcmd=bootipq, active_fw=0,
+  rootfsname=rootfs, ethaddr=00:aa:bb:cc:dd:10, snextra=00000000000000000000`).
+  The board boots.
+- **Valid-but-incomplete env → DANGEROUS.** u-boot now *trusts* your env and
+  stops consulting the defaults, so any boot var you didn't set is missing → the
+  active slot fails to boot.
+
+So: only ever **`fw_setenv` individual fields on top of a known-good env**, or
+**`env default -a`** to restore the whole default set. Never hand-assemble an env.
+
+**MAC surprise.** Wiping the env also drops the stored MAC. EWS firmware reads the
+MAC from ART and is unaffected, but **cloud firmware reads the MAC from env
+`ethaddr`** — with it gone, cloud falls back to the raw Qualcomm default
+(`00:03:7f:xx:xx:xx`) and pulls a *different* DHCP IP. An AP that "vanished" is
+often just this: same device, new MAC, new lease. A managed switch's MAC table
+(by port) + your DHCP leases will find it.
+
+### Recovering a stuck AP (UART)
+
+If the active slot won't boot, USB-TTL 3.3 V (GND↔GND, adapter RX↔AP TX, adapter
+TX↔AP RX, **no VCC** — it's PoE-powered), 115200 8N1. Interrupt the boot
+countdown to reach the u-boot prompt, then:
+
+```
+env default -a        # restore the COMPLETE default env -> the slot boots again
+saveenv
+reset
+```
+
+Then set your real identity the safe way (single fields), verify `fw_printenv`
+shows a complete env (`bootcmd=bootipq`) *before* rebooting, and re-flash as
+needed. A plain power-cycle does **not** help (same bad saved env); the
+dual-image boot-count failsafe also won't trigger if the env can't persist the
+counter. UART is the reliable path back.
+
+## 10. Reverting
 
 Flash the stock `EWS377APv3-*.bin` the same way (`product_id` already `282`, no
 patch), or hold the factory-reset button to fall back to the intact EWS A/B slot.
