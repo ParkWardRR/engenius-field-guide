@@ -26,7 +26,7 @@ EWS/ECW APs), then the payload. Offsets below are verified against stock
 |--------|-------|------|-------|
 | `0x00` | `head` | 4 | `0` |
 | `0x04` | `vendor_id` | 4 | `257` for EnGenius/Senao |
-| `0x08` | `product_id` | 4 | per model — `282` = EWS377AP v3, `300` = EWS377-FIT, `284` = ECW230v3 |
+| `0x08` | `product_id` | 4 | per model — the upload gate keys on this (see [table below](#known-product_ids)) |
 | `0x0C` | `version` | 16 | ASCII, NUL-padded (e.g. `3.9.3.2`) |
 | `0x1C` | `firmware_type` | 4 | `0` = combo (has CAPWAP sub-header); `0xFF` = none |
 | `0x20` | `filesize` | 4 | payload size = total − header length |
@@ -53,6 +53,26 @@ bytes (`model_size = 10`), so the **payload starts at offset 146 (`0x92`)**.
 
 The `product_id` (`0x08`) and the `model` string (`0x88`) are the two fields the
 device's upload check keys on.
+
+### Known `product_id`s
+
+All read directly from real vendor images (`vendor_id` is `257` across the line).
+The value is the firmware-header product id — **not** the 3-char serial
+[model code](model-codes.md); a device has both.
+
+| `product_id` | Model | Board note |
+|---|---|---|
+| `182` | EWS377AP v2 (and the older `ews377ap-all` images) | prior generation |
+| `275` | ECW230 | base cloud AP |
+| `282` | EWS377AP v3 | **cross-flash sibling** |
+| `284` | ECW230v3 | **cross-flash sibling** |
+| `285` | ECW230S | related cloud AP (extra scanning radio); not a verified cross-flash target |
+| `300` | EWS377-FIT | **cross-flash sibling** |
+
+The three **siblings** (`282`/`300`/`284`) are the same `ap-hk07` board in three
+series — the one-field re-head swaps between them. Note the older EWS377APv3
+build `v3.8.2.2` carries the model string `EWS377AP` (no `v3`) yet still reports
+`product_id 282`, so identify by the id, not the string.
 
 ## On-device validation
 
