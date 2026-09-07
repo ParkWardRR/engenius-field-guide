@@ -2,7 +2,9 @@
 
 Map of EnGenius's WiFi product families and which controller runs them.
 
-- Hardware is made by **Senao**; devices run a **private fork of OpenWRT**.
+- Hardware is made by **Senao**; devices run a **private fork of OpenWRT** — and on
+  the `ap-hk07` platform (EWS377AP v3) you can now replace it with
+  **[mainline-style OpenWrt](openwrt-ews377apv3.md)**.
 - The model prefix signals age and controller target.
 - Two on-prem controllers: older **ezMaster** (EOL) and modern **Fit Controller /
   EnGenius Private Cloud (EPC)**. Details: [controllers/landscape](landscape.md).

@@ -51,6 +51,11 @@ Senao firmware header, and reach the controller's MongoDB/Redis directly.
 [Firmware format](firmware-format.md) ·
 [Backend access](backend-access.md)
 
+🐧 **Replace the firmware with OpenWrt.** On the EWS377AP v3 (`ap-hk07`), skip the
+vendor stack entirely — a community OpenWrt port boots persistently from NAND (kernel
+6.18 + NSS offload), no controller or cloud required.
+→ [OpenWrt on the EWS377AP v3](openwrt-ews377apv3.md)
+
 ## Two deep-dive walkthroughs
 
 Fully worked, evidence-based, start-to-finish:
@@ -70,6 +75,7 @@ Fully worked, evidence-based, start-to-finish:
 |-----------|-------|
 | Self-host a controller | [landscape](landscape.md) → [EPC on x86](epc-podman-almalinux.md) or [Fit Controller on ARM](self-hosting-fitcon-arm.md) |
 | Adopt a device the controller rejects | [whitelist the model](add-unknown-models.md) or [cross-flash it](crossflash-ews377apv3-walkthrough.md) |
+| Ditch the vendor firmware entirely | [OpenWrt on the EWS377AP v3](openwrt-ews377apv3.md) |
 | Decode/generate a serial | [serial-numbers](serial-numbers.md) |
 | Understand product lines / shared hardware | [overview](overview.md), [model-equivalence](model-equivalence.md) |
 
@@ -88,6 +94,7 @@ Fully worked, evidence-based, start-to-finish:
 | [model-codes](model-codes.md) | Known 3-char model codes |
 | [firmware-format](firmware-format.md) | Senao image header, mksenaofw, validation |
 | [cross-flashing](cross-flashing.md) | Flashing foreign firmware: reference (method + risks) |
+| [openwrt-ews377apv3](openwrt-ews377apv3.md) | Replace the vendor firmware with mainline-style OpenWrt (`ap-hk07` / IPQ8072A) |
 | [crossflash-ews377apv3-walkthrough](crossflash-ews377apv3-walkthrough.md) | Full worked EWS377AP v3 → Cloud/FIT conversion |
 | [model-equivalence](model-equivalence.md) | Which models share hardware |
 | [examples/epc-podman/](examples/epc-podman/) | Podman compose + env template |
