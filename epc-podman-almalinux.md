@@ -193,6 +193,81 @@ creating the admin account through that sign-up page.
    before relying on it.
 6. **Backups:** stop the stack (or `mongodump` inside `epc-db`) before copying
    `/srv/docker/mongodb/data/db`. Never copy live DB files.
+7. **Hypervisor `onboot` is not optional.** A Proxmox/libvirt VM with `onboot`
+   unset (default **0**) does **not** come back after a *host* reboot — Podman's
+   `restart: always` and `podman-restart.service` only apply once the VM itself
+   is running; they cannot start a VM that never powered on. Symptom: DNS still
+   resolves, but the box is completely dead (ping/ICMP "host is down", every
+   port closed) — looks like a network fault, isn't. Confirm and fix on the
+   hypervisor, not the guest:
+   ```bash
+   qm config <vmid> | grep onboot      # Proxmox: unset/0 = will NOT autostart
+   qm set <vmid> --onboot 1
+   ```
+   (libvirt equivalent: `virsh dominfo <vm> | grep Autostart`, then
+   `virsh autostart <vm>`.) Set this **immediately after VM creation**, not
+   after the first outage teaches you the hard way.
+8. **The vendor `docker-compose.yml` is a live landmine — remove it.** The
+   installer stages **two** compose files side by side in `/epc/pipe/`: the
+   untouched vendor `docker-compose.yml` (what `epc.sh` itself drives — no
+   Podman-socket translation, no cert bind-mounts, no SELinux labels) and
+   whatever hardened/translated file you actually deploy from (e.g.
+   `docker-compose-podman.yml`). If `epc.sh`'s own background install run
+   (§5 — it can still be alive, retrying, well after you've moved on) or any
+   later `docker exec`-driven self-update reaches its own `up`, it recreates
+   the containers **from the vendor file**, silently reverting every Podman
+   customization — including a real TLS cert back to EnGenius's baked-in,
+   **already-expired (2015-issued vendor cert, CN `www.engeniusnetworks.com`,
+   expired 2025-07-10)** self-signed one. This looks exactly like a MITM
+   warning in a browser; it's actually a stale-config regression. Fix:
+   ```bash
+   mv /epc/pipe/docker-compose.yml /epc/pipe/docker-compose.yml.DO-NOT-USE
+   ```
+   once your hardened file is confirmed working, so nothing can ever exec
+   against the vendor version again. Re-verify after: `podman inspect epc-api`
+   should show your cert/socket mounts, not the vendor defaults.
+
+## 6b. Real TLS cert (replace the expired vendor one)
+
+`epc-api`'s nginx serves TLS from **paths baked into the image**:
+`/app/nginx.crt` + `/app/nginx.key` — not `/epc/portal_cert/` (a different,
+unrelated cert pair that ships alongside but isn't what's on the wire; don't
+waste time replacing that one). Confirm what's actually being served and what
+nginx expects:
+```bash
+echo | openssl s_client -connect <vm-ip>:443 2>/dev/null | openssl x509 -noout -subject -enddate
+sudo podman exec epc-api grep -n ssl_certificate /nginx.conf   # -> /app/nginx.crt, /app/nginx.key
+```
+Get a real cert (Let's Encrypt via DNS-01 works even if the hostname only
+resolves internally — DNS-01 only needs the zone's public NS to accept the
+ACME TXT record, not a reachable A record) and bind-mount it over the vendor
+paths instead of trying to inject it into the image:
+```bash
+curl -s https://get.acme.sh | sudo sh
+sudo env CF_Token="<cloudflare-api-token>" \
+  /root/.acme.sh/acme.sh --issue --dns dns_cf -d <host>.<domain>
+sudo /root/.acme.sh/acme.sh --install-cert -d <host>.<domain> --ecc \
+  --fullchain-file /root/cert/<host>.crt --key-file /root/cert/<host>.key \
+  --reloadcmd "podman restart epc-api"        # auto-renew + auto-reinstall
+```
+Add two lines to `epc-api`'s `volumes:` in your hardened compose (**not** the
+vendor file — see gotcha 8):
+```yaml
+- /root/cert/<host>.crt:/app/nginx.crt:ro
+- /root/cert/<host>.key:/app/nginx.key:ro
+```
+Then a **full stack cycle**, not a single-container recreate — Podman's
+inter-container `depends_on`/`--requires` chain (`epc-radius` requires
+`epc-api` requires `epc-db`) blocks removing/recreating one container while
+another depends on it:
+```bash
+cd /epc/pipe
+sudo podman-compose -p epc -f docker-compose-podman.yml --env-file .epc-prod down
+sudo podman-compose -p epc -f docker-compose-podman.yml --env-file .epc-prod up -d
+```
+Data survives — Mongo and `/epc` live on host bind mounts, not in the
+container. Verify with a **clean** `curl` (no `-k`): `verify=0` and a matching
+CN means it worked.
 
 ## 7. Source of truth
 
