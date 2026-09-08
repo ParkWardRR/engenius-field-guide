@@ -219,6 +219,11 @@ hardware's original `X44`, so the controller treats it as the model it's now
 running. Same "forge a serial with the right model code" idea as
 [serial-numbers](serial-numbers.md).
 
+> **Podman EPC users:** adoption requires two extra patches — the nginx DNS
+> resolver fix and a checkin.pyc signature bypass. See
+> [EPC on Podman/AlmaLinux §8e–8f](epc-podman-almalinux.md#8e-podman-specific-patches-for-device-adoption)
+> for the full procedure.
+
 > **Prefer the supported path if you can.** A fabricated `snextra` is an
 > *internal, unsupported* identity — treat it as a system with controls (unique
 > per device, derived deterministically from the label MAC/serial, collision-

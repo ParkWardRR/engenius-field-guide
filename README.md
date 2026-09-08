@@ -66,8 +66,10 @@ Fully worked, evidence-based, start-to-finish:
   the controller keys devices by serial, and a crossflash reports `sn=0000`) is
   the real gate.
 - **[EPC on Podman/AlmaLinux](epc-podman-almalinux.md)** — the full 7-container
-  deploy, the Docker-socket → podman-socket port, SELinux Enforcing, and (§8) the
-  device-onboarding agent + pipes + the serial-keyed check-in flow.
+  deploy (1.8.8–1.9.1), the Docker-socket → podman-socket port, SELinux Enforcing,
+  the device-onboarding agent + pipes + the serial-keyed check-in flow, and the
+  Podman-specific adoption patches (nginx DNS resolver, checkin sig bypass, Redis
+  device-hash flush).
 
 ## Start here
 
@@ -85,7 +87,7 @@ Fully worked, evidence-based, start-to-finish:
 |-----|--------|
 | [overview](overview.md) | Product lines and which controller manages what |
 | [landscape](landscape.md) | ezMaster vs Fit Controller/EPC; device compatibility |
-| [epc-podman-almalinux](epc-podman-almalinux.md) | EPC 1.8.8 as Podman containers on AlmaLinux (incl. device onboarding) |
+| [epc-podman-almalinux](epc-podman-almalinux.md) | EPC 1.8.8–1.9.1 as Podman containers on AlmaLinux (incl. device onboarding + adoption patches) |
 | [self-hosting-fitcon-arm](self-hosting-fitcon-arm.md) | Fit Controller stack on ARM / Raspberry Pi |
 | [backend-access](backend-access.md) | MongoDB + Redis access |
 | [add-unknown-models](add-unknown-models.md) | Whitelist an unsupported model |

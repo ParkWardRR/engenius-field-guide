@@ -11,5 +11,5 @@
 # Public AWS ECR registry (no authentication required)
 REPOSITORY_URI=public.ecr.aws/d3g4m7o9/
 
-# EPC release to deploy
-VERSION=1.8.8
+# EPC release to deploy (tested: 1.8.8, 1.9.1)
+VERSION=1.9.1

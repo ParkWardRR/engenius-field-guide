@@ -1,29 +1,45 @@
 # Running EnGenius Private Cloud (EPC) on Podman / AlmaLinux
 
-Field notes for deploying **EnGenius Private Cloud (EPC) 1.8.8** as **Podman**
-containers on **AlmaLinux 10**, instead of the vendor's Docker-on-Ubuntu path.
-EnGenius officially supports Docker on Ubuntu/Debian; Podman on AlmaLinux is a
-**workable but unsupported** adaptation.
+Field notes for deploying **EnGenius Private Cloud (EPC) 1.8.8–1.9.1** as
+**Podman** containers on **AlmaLinux 10**, instead of the vendor's
+Docker-on-Ubuntu path. EnGenius officially supports Docker on Ubuntu/Debian;
+Podman on AlmaLinux is a **workable but unsupported** adaptation.
 
 > Context: EPC is EnGenius's modern on-prem controller and a natural
 > replacement for the EOL **ezMaster** appliance. These notes come from an
-> actual Podman/AlmaLinux deployment that runs green under SELinux Enforcing.
+> actual Podman/AlmaLinux deployment — tested on 1.8.8 and 1.9.1 — that runs
+> green under SELinux Enforcing with a cross-flashed AP adopted and checking in.
 
 ## 1. What EPC actually is
 
-EPC 1.8.8 (`epc.sh` installer, released 2026-02-09) is a **7-container Docker
-Compose stack**. Images live on **AWS public ECR** (no auth):
-`public.ecr.aws/d3g4m7o9/<name>:1.8.8`.
+EPC is a **7-container Docker Compose stack**. Images live on **AWS public ECR**
+(no auth): `public.ecr.aws/d3g4m7o9/<name>:<version>`.
 
-| Container | Size (amd64) | Role | Host ports |
-|-----------|-------------|------|-----------|
-| `epc-db` | 127 MB | MongoDB + Redis (data/auth store) | — |
-| `epc-api` | 289 MB | Backend (nginx + gunicorn), web UI | 8080→80, 443 |
-| `epc-raccoon` | 206 MB | Portal / reverse-proxy front | 80 |
-| `epc-mdns` | 82 MB | mDNS/bonjour discovery (**host net**) | (host) |
-| `epc-agent` | 76 MB | Device onboarding agent (`agent.yml`) | — |
-| `epc-otter` | 58 MB | Background worker | — |
-| `epc-radius` | 23 MB | FreeRADIUS (802.1X / CoA) | 1812-1813/udp, 18120, 3799/udp |
+Available versions (checked via S3):
+
+```
+http://engenius-epc.s3.us-west-2.amazonaws.com/dev/<version>/epc-pkg.tar.gz
+```
+
+| Version | Status |
+|---------|--------|
+| 1.8.8 | ✅ tested on Podman |
+| 1.8.9 | available (untested) |
+| 1.9.0 | available (untested) |
+| 1.9.1 | ✅ tested on Podman, AP adopted |
+
+Other versions return 403 (not published). Use a working version as baseline
+and check S3 before assuming a newer one exists.
+
+| Container | Role | Host ports | Notes |
+|-----------|------|-----------|-------|
+| `epc-db` | MongoDB + Redis (data/auth store) | — | |
+| `epc-api` | Backend (nginx + gunicorn), web UI | 8080→80, 443 | |
+| `epc-raccoon` | Portal / reverse-proxy front | 80 | |
+| `epc-mdns` | mDNS/bonjour discovery (**host net**) | — | |
+| `epc-agent` | Device onboarding agent | — | In main compose ≥1.9.1; separate `agent.yml` on 1.8.8 |
+| `epc-otter` | Background worker | — | |
+| `epc-radius` | FreeRADIUS (802.1X / CoA) | 1812-1813/udp, 18120, 3799/udp | |
 
 ```mermaid
 flowchart TB
@@ -105,9 +121,10 @@ for p in 80/tcp 443/tcp 8080/tcp 18120/tcp 1812/udp 1813/udp 3799/udp; do
   sudo firewall-cmd --permanent --add-port=$p
 done; sudo firewall-cmd --reload
 
-# pre-stage all 7 images
+# pre-stage all 7 images (substitute your target version)
+EPC_VER=1.9.1
 for i in agent api db raccoon otter mdns radius; do
-  sudo podman pull public.ecr.aws/d3g4m7o9/epc-$i:1.8.8
+  sudo podman pull public.ecr.aws/d3g4m7o9/epc-$i:$EPC_VER
 done
 ```
 
@@ -135,14 +152,14 @@ sed -i 's/^ENVIRONMENT=0/ENVIRONMENT=1/' epc.sh   # skips install_tools + pull
 sed -i 's/docker exec -it/docker exec/g' epc.sh
 
 # --- run it ---  (backgrounds a fitdog watchdog that holds the tty; redirect it)
-sudo ./epc.sh install 1.8.8   > /tmp/epc.log 2>&1 &
+sudo ./epc.sh install $EPC_VER   > /tmp/epc.log 2>&1 &
 
 # If epc.sh stalls, bring the stack up by hand (equivalent to its start()):
 cd /epc/pipe
 sudo podman-compose -p epc -f docker-compose.yml --env-file .epc-prod up -d
 
 # --- REQUIRED fix: epc.sh's setup_env doesn't write config.ini's [ocu] ---
-printf "[ocu]\nstage = production\nversion = 1.8.8\n" | sudo tee /epc/config.ini
+printf "[ocu]\nstage = production\nversion = $EPC_VER\n" | sudo tee /epc/config.ini
 
 # --- finish init (create_uuid + import default DB data) ---
 sudo docker exec epc-api sh -c 'python /app/create_uuid.pyc'
@@ -153,11 +170,11 @@ sudo docker exec epc-api sh -c 'python /app/db-init.pyc -i'   # import default d
 sudo systemctl enable podman-restart.service            # restart=always on boot
 ```
 
-**Result (verified):** all 6 containers (`epc-db/api/mdns/raccoon/otter/radius`)
-Up; `https://<vm-ip>/` and `http://<vm-ip>:8080/` return 200 and render the EPC
-**v1.8.8** first-run sign-up page ("EnGenius Private Cloud – On-Premises Network
-Management"). API↔Mongo↔Redis healthy per `epc-api` logs. First real step is
-creating the admin account through that sign-up page.
+**Result (verified on 1.8.8 and 1.9.1):** all 7 containers
+(`epc-db/api/mdns/raccoon/otter/agent/radius`) Up; `https://<vm-ip>/` and
+`http://<vm-ip>:8080/` return 200 and render the EPC first-run sign-up page.
+API↔Mongo↔Redis healthy per `epc-api` logs. First real step is creating the
+admin account through that sign-up page.
 
 ## 6. Gotchas found during the port
 
@@ -227,6 +244,17 @@ creating the admin account through that sign-up page.
    against the vendor version again. Re-verify after: `podman inspect epc-api`
    should show your cert/socket mounts, not the vendor defaults.
 
+9. **Mongo index conflict on version upgrade.** Upgrading from 1.8.8 to 1.9.1
+   (reusing the same Mongo data) can fail with `IndexOptionsConflict: Index with
+   name: profile.email_1 already exists with different options`. The 1.9.1
+   schema changed the index definition. Fix: drop the conflicting index in Mongo,
+   then restart `epc-api`:
+   ```bash
+   sudo podman exec epc-db mongosh --eval \
+     "db.getSiblingDB('main').users.dropIndex('profile.email_1')"
+   sudo podman restart epc-api
+   ```
+
 ## 6b. Real TLS cert (replace the expired vendor one)
 
 `epc-api`'s nginx serves TLS from **paths baked into the image**:
@@ -271,9 +299,12 @@ CN means it worked.
 
 ## 7. Source of truth
 
-- Installer: `http://engenius-epc.s3.us-west-2.amazonaws.com/dev/1.8.8/epc.sh`
-- Package (compose + configs): `.../1.8.8/epc-pkg.tar.gz`
+- Installer: `http://engenius-epc.s3.us-west-2.amazonaws.com/dev/<version>/epc.sh`
+- Package (compose + configs): `.../dev/<version>/epc-pkg.tar.gz`
 - Docs: https://doc.engenius.ai/home-epc-quick-start-guide
+
+Substitute `<version>` with `1.8.8`, `1.8.9`, `1.9.0`, or `1.9.1` (known
+available). Other version strings return 403.
 
 ## 8. Device onboarding — the agent, the pipes, and the mTLS gate
 
@@ -287,7 +318,8 @@ host-side pipe servicer that the main compose doesn't:
 
 - **`epc-agent`** — host-network container, mounts `/epc` + the Docker socket.
   Handles software/OCU updates, `/etc/hosts` replica-set names, and host-command
-  requests from the other containers.
+  requests from the other containers. **On EPC ≥1.9.1** the agent is included in
+  the main compose; on 1.8.8 it runs as a separate project.
 - **`fitdog` → `host.sh`** — a host loop that reads `req_id;;cmd` from
   `/epc/pipe/host` and `eval`s it on the host (container→host command bridge),
   replying on `resp_<id>`. `host.sh` ships inside the `epc-pkg.tar.gz` and the
@@ -295,20 +327,28 @@ host-side pipe servicer that the main compose doesn't:
 
 ### 8b. Bring them up (Podman)
 
+**EPC ≥1.9.1:** `epc-agent` is in the main compose — a plain `podman-compose up
+-d` starts all 7 containers. You still need the named pipes + fitdog:
+
 ```bash
-# named pipes + host servicer
 sudo systemctl start podman.socket
 for p in req msg host host_msg; do [ -p /epc/pipe/$p ] || sudo mkfifo /epc/pipe/$p; done
 sudo cp <epc-pkg>/host.sh /epc/pipe/host.sh; sudo chmod +x /epc/pipe/host.sh /epc/pipe/fitdog
 sudo sh -c 'nohup /epc/pipe/fitdog >/var/log/epc/fitdog.log 2>&1 &'   # -> host.sh
+```
+
+**EPC 1.8.8:** the agent is **not** in the main compose — run it manually:
+
+```bash
+# named pipes + host servicer (same as above)
 
 # the agent (docker.sock -> podman.sock; label=disable for the socket)
 sudo mkdir -p /var/log/epc/agent
 sudo podman run -d --replace --name epc-agent --network host --restart always \
   -v /epc:/epc:z -v /var/log/epc/agent:/var/log/epc:z \
   -v /run/podman/podman.sock:/var/run/docker.sock:z --security-opt label=disable \
-  -e REPOSITORY_URI=public.ecr.aws/d3g4m7o9/ -e VERSION=1.8.8 -e HOST_IP=<vm-ip> \
-  public.ecr.aws/d3g4m7o9/epc-agent:1.8.8 /start-agent.sh
+  -e REPOSITORY_URI=public.ecr.aws/d3g4m7o9/ -e VERSION=$EPC_VER -e HOST_IP=<vm-ip> \
+  public.ecr.aws/d3g4m7o9/epc-agent:$EPC_VER /start-agent.sh
 ```
 
 Healthy agent logs: `epc Agent Starting…` / `EPC is not HA mode.`
@@ -351,3 +391,101 @@ knows** (§8d). The last is where a *cross-flashed* AP dies: it can present a
 factory serial, so it never matches a `device/<sn>` record — see the
 [cross-flash walkthrough](crossflash-ews377apv3-walkthrough.md) for reading and
 re-writing the serial (`setconfig -g/-s 19`).
+
+### 8e. Podman-specific patches for device adoption
+
+Two fixes are required on Podman that Docker doesn't need. Both are
+bind-mounted in the compose file and survive container rebuilds.
+
+**1. nginx resolver: `127.0.0.11` → `10.89.0.1`**
+
+nginx inside `epc-api` uses `set $raccoon epc-raccoon;` for dynamic upstream
+resolution. The image ships `resolver 127.0.0.11` — Docker's embedded DNS.
+Podman's container DNS lives at **`10.89.0.1`**. Without this fix, every
+`GET /device/register` → **502** (30 s timeout per attempt, indefinitely).
+
+```bash
+# extract the config from the running image, patch the resolver
+sudo podman cp epc-api:/nginx.conf /epc/nginx.conf.podman
+sed -i 's/resolver 127\.0\.0\.11/resolver 10.89.0.1/' /epc/nginx.conf.podman
+```
+
+Add to `epc-api` volumes in compose:
+```yaml
+- /epc/nginx.conf.podman:/nginx.conf:ro
+```
+
+Restart the stack. Verify: `curl -sk https://localhost/device/register` should
+no longer 502 (a 404 "not registered" is the correct not-yet-adopted response).
+
+**2. checkin.pyc signature bypass (firmware HMAC mismatch)**
+
+AP firmware ≥1.8.114 computes the `Kaiwoo-signature` HMAC-SHA256 differently
+from what EPC 1.8.8–1.9.1's `valid_signature_ex` expects. The
+`DEFAULT_PRESHARED_KEY` (`{mac}{snextra}@ne$`) is correct, but the message
+format changed between firmware generations. Exhaustive brute-force of all
+message×key combinations confirmed no match — this is a protocol-level
+incompatibility, not a config issue.
+
+The fix is a **bytecode patch** in `routers/checkin.pyc`, function
+`handle_auth_request`. The `EXTENDED_ARG + POP_JUMP_IF_FALSE` that gates the
+`valid_signature_ex` result is replaced with `POP_TOP + NOP`, unconditionally
+passing. The exact offset differs per EPC version (check the bytecode — look
+for the `CALL_METHOD` to `valid_signature_ex` and the conditional jump that
+follows it).
+
+```bash
+# back up the original
+sudo podman cp epc-api:/app/routers/checkin.pyc /epc/checkin.pyc.orig
+cp /epc/checkin.pyc.orig /epc/checkin.pyc.patched
+# apply the patch (use a hex editor or python to patch the two bytes)
+```
+
+Add to `epc-api` volumes:
+```yaml
+- /epc/checkin.pyc.patched:/app/routers/checkin.pyc:ro
+```
+
+> ⚠️ This bypasses signature validation for **all** devices, not just one.
+> Acceptable on an isolated lab/home network; on a shared network, consider
+> the implications. Revert by removing the bind-mount.
+
+### 8f. Redis device hash is flushed on every epc-api restart
+
+`epc-api` flushes **all** Redis keys on startup, then re-creates org/network/model
+data from MongoDB — but does **not** re-create `device/<mac>` hashes. After any
+`epc-api` container restart or stack cycle, the AP's check-in will 404 until
+you re-seed the device hash from a Python one-liner inside `epc-api`:
+
+```bash
+sudo podman exec epc-api python3 -c "
+import redis, os
+r = redis.Redis(host='epc-db', port=6379,
+    password=os.environ.get('REDIS_PASS',''), decode_responses=True)
+r.hset('device/<mac_lower>', mapping={
+  'secret': 'bootstrap', 'falcon_nid': '<network_id>',
+  'name': '<device_name>', 'type': 'ap', 'model': '<model>',
+  'is_sync_config': '0', 'config_version': '0', 'is_in_trial_zone': '0',
+  'expired_date': '4102444800', 'license_type': 'pro',
+  'last_checkin_time': '0', 'first_checkin_time': '0',
+  'upgrade_deferred': '0', 'config_modified_time': '0',
+  'device_pairing': '', 'serial_number': '<serial>', 'series': 'cloud'
+})
+"
+```
+
+Replace `<mac_lower>`, `<network_id>`, `<device_name>`, `<model>`, and
+`<serial>` with the device's values. Get the `falcon_nid` (network ObjectId)
+from `db.networks.find()` in Mongo. The `REDIS_PASS` is in `/epc/pipe/.epc-prod`.
+
+### 8g. Known issue: dashboard "Connection lost" (WebSocket)
+
+The EPC dashboard SPA opens a WebSocket to `/ws`. This endpoint returns **404**
+from gunicorn — there is no WebSocket handler in the EPC Python codebase (tested
+on both 1.8.8 and 1.9.1). nginx forwards `/ws` to `127.0.0.1:8000` (gunicorn),
+which doesn't serve it.
+
+The dashboard shows a "Connection lost" warning. **This does not affect device
+adoption or management** — check-in, raccoon long-poll, and config push all work
+via HTTP. The warning is cosmetic. Devices still appear under Access Points in
+the UI; the Dashboard tile may show 0 until a page refresh.

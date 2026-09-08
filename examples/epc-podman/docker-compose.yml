@@ -1,7 +1,7 @@
-# EnGenius Private Cloud (EPC) 1.8.8 — Podman adaptation for AlmaLinux 10
+# EnGenius Private Cloud (EPC) 1.8.8–1.9.1 — Podman adaptation for AlmaLinux 10
 #
 # Translated from EnGenius's official Docker compose shipped inside
-# epc-pkg.tar.gz (http://engenius-epc.s3.us-west-2.amazonaws.com/dev/1.8.8/).
+# epc-pkg.tar.gz (http://engenius-epc.s3.us-west-2.amazonaws.com/dev/<version>/).
 # Images come from AWS public ECR (no auth): public.ecr.aws/d3g4m7o9/
 #
 # Key changes vs. the upstream Docker compose:
@@ -92,6 +92,24 @@ services:
       - /epc:/epc:z
       - /var/log/epc/otter:/var/log/otter:z
     container_name: epc-otter
+    restart: always
+    logging: {driver: json-file, options: {max-size: 10m, max-file: "5"}}
+
+  epc-agent:                    # device onboarding agent (in main compose since 1.9.1)
+    image: ${REPOSITORY_URI}epc-agent:${VERSION}
+    depends_on: [epc-db]
+    command: [/start-agent.sh]
+    network_mode: host
+    container_name: epc-agent
+    security_opt:
+      - label=disable
+    volumes:
+      - /epc:/epc:z
+      - /var/log/epc/agent:/var/log/epc:z
+      - /run/podman/podman.sock:/var/run/docker.sock:z
+    environment:
+      - REPOSITORY_URI=${REPOSITORY_URI}
+      - VERSION=${VERSION}
     restart: always
     logging: {driver: json-file, options: {max-size: 10m, max-file: "5"}}
 
