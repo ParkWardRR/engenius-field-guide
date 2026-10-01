@@ -266,7 +266,76 @@ The Podman guide in this repo documents a working port and is still accurate
 for lab use. For a production homelab where reliability matters, Docker on
 Ubuntu eliminates the entire shim stack and just works.
 
-## 6. Backend access
+## 6. TLS with Caddy reverse proxy
+
+The vendor cert is expired (CN `www.engeniusnetworks.com`, 2025-07-10). Use
+Caddy as a reverse proxy with automatic Let's Encrypt via DNS-01.
+
+### 6.1 Remap container ports
+
+```yaml
+# docker-compose.yml:
+epc-api:     "443:443" → "8443:443"   (keep "8080:8080")
+epc-raccoon: "80:80"   → "8081:80"
+```
+
+```bash
+docker-compose -p epc -f /epc/pipe/docker-compose.yml \
+  --env-file /epc/pipe/.epc-prod up -d --no-deps epc-api epc-raccoon
+```
+
+### 6.2 Install Caddy
+
+Build Caddy with the Cloudflare DNS module (or copy one that already has it):
+
+```bash
+xcaddy build --with github.com/caddy-dns/cloudflare
+sudo mv caddy /usr/local/bin/caddy
+```
+
+### 6.3 Configure
+
+```bash
+useradd -r -s /usr/sbin/nologin -d /var/lib/caddy caddy
+mkdir -p /etc/caddy /var/lib/caddy/.local /var/lib/caddy/.config /var/log/caddy
+chown -R caddy:caddy /var/lib/caddy /var/log/caddy
+
+echo 'CF_API_TOKEN=<your-cloudflare-dns-api-token>' > /etc/caddy/env
+chmod 600 /etc/caddy/env
+```
+
+`/etc/caddy/Caddyfile`:
+
+```caddyfile
+your-epc.example.com {
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
+        resolvers 1.1.1.1 8.8.8.8
+    }
+    handle /device/* {
+        reverse_proxy 127.0.0.1:8081
+    }
+    handle {
+        reverse_proxy 127.0.0.1:8080
+    }
+    encode gzip
+}
+```
+
+Create a systemd unit with `User=caddy`, `EnvironmentFile=/etc/caddy/env`,
+`AmbientCapabilities=CAP_NET_BIND_SERVICE`. Then:
+
+```bash
+systemctl daemon-reload && systemctl enable --now caddy
+```
+
+Caddy obtains a cert via Cloudflare DNS-01 within ~15 seconds. Works even if
+the hostname only resolves on your LAN.
+
+> **Note:** After recreating `epc-api`, the license cron resets — re-disable it
+> (§3.6 step 2) or `fitregister.enable` reverts to false within a minute.
+
+## 7. Backend access
 
 Credentials are in plaintext at `/epc/pipe/.epc-prod`:
 
@@ -281,7 +350,7 @@ docker exec -it epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
   --authenticationDatabase admin main
 ```
 
-## 7. Source of truth
+## 8. Source of truth
 
 - Installer: `http://engenius-epc.s3.us-west-2.amazonaws.com/dev/<version>/epc.sh`
 - Package (compose + configs): `.../dev/<version>/epc-pkg.tar.gz`
@@ -289,7 +358,7 @@ docker exec -it epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
 - ARM/FitController installer: `https://epc-release.s3.us-west-2.amazonaws.com/epc-prod.sh`
 - Docs: https://doc.engenius.ai/home-epc-quick-start-guide
 
-## 8. See also
+## 9. See also
 
 - [EPC on Podman/AlmaLinux](epc-podman-almalinux.md) — the full Podman port (lab use)
 - [Backend access](backend-access.md) — MongoDB + Redis shell access
