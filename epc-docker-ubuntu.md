@@ -204,6 +204,11 @@ The dashboard should show "Everything is OK!" with empty device counts.
 | 15 | Caddy drops AP check-ins (status 0 / NOP) | AP connects by IP → Host header doesn't match hostname block. Add a `:443 { tls internal }` catch-all (§6.3) |
 | 16 | Redis `device/<mac>` key must use lowercase MAC | Check-in code calls `mac.lower()` before Redis lookup |
 | 17 | Mongo Device model field is `serial_number`, not `serial` | MongoEngine `Device.objects(serial_number=...)` maps to db field `serial_number` |
+| 18 | `validate_license` blocks config delivery | Without license bypass, check-in returns 200 with empty body — AP never gets config. Patch alongside signature (§7.1) |
+| 19 | `get_checkin_reply` crashes on empty `checkin_reply` | `'NoneType' object has no attribute 'decode'` — config must be generated and pushed before first check-in (§7.3) |
+| 20 | Device missing `ap` embedded document → config generation fails | `get_ap_device_config` accesses `device.ap.profile.category`. Set the `ap` subdocument with `profile.band` + `profile.category` from the `models` collection |
+| 21 | `config_compressed` format mismatch | `checkin_reply` stores **base64-encoded JSON** (not zlib compressed). Storing raw zlib bytes causes `UnicodeDecodeError` on check-in |
+| 22 | Default SSID is open (auth_type: disabled) | The seed SSID profile "EnGenius WiFi" ships with no security. Set WPA2-PSK before pushing config (§7.4) |
 
 ### Infrastructure
 
@@ -370,13 +375,19 @@ the hostname only resolves on your LAN.
 
 ## 7. Device adoption
 
-### 7.1 Bypass HMAC signature check
+### 7.1 Bypass HMAC signature check and license validation
 
-The check-in handler validates an HMAC-SHA256 signature on every AP request.
-The AP computes the signature using `mac.lower() + serial_number + "0@ne$"` as
-the HMAC key over `auth_header + url_path + body`. The EPC-side verification
-fails because the message format doesn't match between AP firmware and EPC
-code. Patch the bytecode to bypass:
+The check-in handler in `chicken.pyc` validates two things that fail on
+self-hosted EPC:
+
+1. **HMAC signature** (`valid_signature` / `valid_signature_ex`): AP computes
+   `mac.lower() + serial_number + "0@ne$"` as the HMAC key over
+   `auth_header + url_path + body`. The EPC-side verification fails because
+   the message format doesn't match.
+2. **License validation** (`validate_license`): Without a valid license, the
+   check-in returns 200 with an empty body — the AP never receives config.
+
+Patch all three methods to `return True`:
 
 ```bash
 docker exec epc-api python3 << 'PYEOF'
@@ -396,7 +407,7 @@ def patch(co):
     changed = False
     for i, c in enumerate(consts):
         if isinstance(c, types.CodeType):
-            if c.co_name in ("valid_signature", "valid_signature_ex"):
+            if c.co_name in ("valid_signature", "valid_signature_ex", "validate_license"):
                 consts[i] = c.replace(co_code=new_bc, co_consts=(None, True), co_stacksize=1)
                 changed = True
             else:
@@ -416,14 +427,29 @@ docker restart epc-api
 
 ### 7.2 Register a device
 
-After the signature bypass, register the device in both Mongo and Redis.
-The check-in flow checks Mongo first (`Device.objects(serial_number=...)`),
+After the signature/license bypass, register the device in both Mongo and
+Redis. The check-in flow checks Mongo first (`Device.objects(serial_number=...)`),
 then Redis (`device/<mac_lowercase>`).
+
+Look up your org/network IDs first:
 
 ```bash
 source /epc/pipe/.epc-prod
 
+docker exec epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
+  --authenticationDatabase admin main --eval \
+  'db.orgs.find({}, {name:1}).forEach(printjson)'
+# → gives you <org_id>
+
+docker exec epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
+  --authenticationDatabase admin main --eval \
+  'db.networks.find({}, {name:1}).forEach(printjson)'
+# → gives you <network_id>
+```
+
+```bash
 # 1. Insert into Mongo (field must be serial_number, not serial)
+#    The "ap" embedded document is required for config generation.
 docker exec epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
   --authenticationDatabase admin main --eval '
   db.devices.insertOne({
@@ -431,16 +457,34 @@ docker exec epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
     name: "<device-name>",
     model: "<model>",
     serial_number: "<serial>",
-    mac: "<MAC>",
+    mac: "<MAC-lowercase>",
     org_id: "<org_id>",
     network_id: "<network_id>",
     hierarchy_view_id: "<network_id>",
     is_sync_config: false,
     is_config_up_to_date: false,
+    ap: {
+      profile: {
+        band: "<band-from-models-collection>",
+        category: "<indoor|outdoor>"
+      },
+      is_mesh_enable: false,
+      radios: [], ssid_profiles: [], fast_handover: []
+    },
     created_time: new Date(),
     modified_time: new Date()
   })'
+```
 
+Look up band/category from the models collection:
+
+```bash
+docker exec epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
+  --authenticationDatabase admin main --eval \
+  'db.models.find({name: "<model>"}, {band:1, category:1}).forEach(printjson)'
+```
+
+```bash
 # 2. Seed Redis (MAC must be lowercase)
 docker exec epc-db redis-cli -a "$REDIS_PASS" HMSET "device/<mac_lower>" \
   mac "<mac_lower>" sn "<serial>" serial_number "<serial>" \
@@ -461,7 +505,88 @@ docker exec epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
   'db.fitregister.updateOne({}, {$set: {enable: true}})'
 ```
 
-### 7.3 Point the AP at the controller
+### 7.3 Generate and push config
+
+The AP won't receive wireless config until it's explicitly generated and
+stored in Redis. The `get_checkin_reply` function in `chicken.pyc` reads
+`checkin_reply` and `config_version` from the device hash — if they're empty
+it crashes with `'NoneType' object has no attribute 'decode'`.
+
+Generate and push the config from inside the container:
+
+```bash
+docker exec epc-api python3 << 'PYEOF'
+import sys, json, base64, time
+sys.path.insert(0, "/app")
+
+from pkg.general.redis_pool import RedisPool
+redis = RedisPool.get_connection()
+from squirrel.device_model import Device
+from squirrel.network_collection_model import Network
+from pkg.general.update_device_config import get_ap_device_config
+
+MAC = "<mac_lowercase>"                  # e.g. 88:dc:97:04:44:07
+SN  = "<serial_number>"                 # e.g. EPC1X420000000000000
+NID = "<network_id>"                    # e.g. 60b83f5fdcf61564c17e9f2f
+
+device  = Device.objects(serial_number=SN).first()
+network = Network.objects(id=NID).first()
+
+config     = get_ap_device_config(network, device, {})
+config_str = json.dumps(config, separators=(",", ":"))
+config_b64 = base64.b64encode(config_str.encode("utf-8")).decode("utf-8")
+
+lua = '''
+redis.call("HMSET", KEYS[1], "checkin_reply", ARGV[1], "diff", ARGV[2], "is_sync_config", ARGV[3])
+redis.call("HINCRBY", KEYS[1], "config_version", 1)
+'''
+redis.eval(lua, 1, f"device/{MAC}", config_b64, "", "True")
+print(f"Config pushed ({len(config_b64)} bytes)")
+PYEOF
+```
+
+The AP picks up the config on its next check-in (~12 seconds), applies it
+(radios restart, ~2 minutes of silence), then resumes checking in with the
+new config version. Verify:
+
+```bash
+tail -f /var/log/caddy/access.log | grep checkin
+# Expect: status=200 size=<non-zero> on first delivery, then size=0 after.
+```
+
+**Key format detail:** `checkin_reply` in Redis stores **base64-encoded JSON**
+(not compressed). The `set_device_config` Lua script in `redis_api.pyc` calls
+`HINCRBY config_version 1` on each push. `config_compressed` is unused by
+the set path — don't store raw zlib bytes there or the check-in will crash.
+
+### 7.4 Set SSID security
+
+The default SSID profile has `auth_type: "disabled"` (open WiFi). Set
+WPA2-PSK before pushing config:
+
+```bash
+source /epc/pipe/.epc-prod
+
+docker exec epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
+  --authenticationDatabase admin main --eval '
+  db.networks.updateOne(
+    {_id: ObjectId("<network_id>")},
+    {$set: {
+      "policy.ap_policy.ssid_profiles.0.name": "<SSID-name>",
+      "policy.ap_policy.ssid_profiles.0.security.auth_type": "WPA2-PSK",
+      "policy.ap_policy.ssid_profiles.0.security.wpa.passphrase": "<passphrase>",
+      "policy.ap_policy.ssid_profiles.0.security.wpa.type": "aes",
+      "policy.ap_policy.ssid_profiles.0.ieee_802_11w.is_enable": true,
+      "modified_time": new Date()
+    }})'
+```
+
+Valid `auth_type` values: `disabled`, `WPA2-PSK`, `WPA2-Enterprise`, `OWE`,
+`WPA3-Personal`, `WPA2/WPA3-Personal`, `WPA3-Enterprise`.
+
+After updating the SSID, regenerate and push config (§7.3).
+
+### 7.5 Point the AP at the controller
 
 ```bash
 curl -sk -u admin:admin -X POST "https://<ap-ip>/api/mgm/force_ac" \

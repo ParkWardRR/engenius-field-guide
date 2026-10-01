@@ -1,5 +1,13 @@
 # Running EnGenius Private Cloud (EPC) on Podman / AlmaLinux
 
+> **Status: deprecated — use [Docker/Ubuntu](epc-docker-ubuntu.md) instead.**
+> This guide documents a working Podman port that ran in production for four
+> months (June–September 2026). We moved off it after two production incidents
+> caused by the shim stack. The code is preserved here for reference, SELinux
+> research, and anyone running RHEL-family hosts where Docker isn't an option.
+> See the [Docker guide's post-mortem](epc-docker-ubuntu.md#5-why-we-moved-off-podman--a-post-mortem)
+> for what broke and why.
+
 Field notes for deploying **EnGenius Private Cloud (EPC) 1.8.8–1.9.1** as
 **Podman** containers on **AlmaLinux 10**, instead of the vendor's
 Docker-on-Ubuntu path. EnGenius officially supports Docker on Ubuntu/Debian;
