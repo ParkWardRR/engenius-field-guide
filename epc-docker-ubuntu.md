@@ -200,6 +200,10 @@ The dashboard should show "Everything is OK!" with empty device counts.
 | 11 | `notification_templates.json` missing | Copy from `/epc/pipe/` to `/epc/` |
 | 12 | `prestart.sh` resets Mongo to defaults (some builds) | Delete it: `docker exec epc-api rm /app/prestart.sh` |
 | 13 | Mongo `IndexOptionsConflict` on version upgrade | `db.users.dropIndex('profile.email_1')`, then restart |
+| 14 | HMAC signature check rejects all AP check-ins | Bytecode-patch `chicken.pyc`: set `valid_signature` + `valid_signature_ex` to `return True` (see §7) |
+| 15 | Caddy drops AP check-ins (status 0 / NOP) | AP connects by IP → Host header doesn't match hostname block. Add a `:443 { tls internal }` catch-all (§6.3) |
+| 16 | Redis `device/<mac>` key must use lowercase MAC | Check-in code calls `mac.lower()` before Redis lookup |
+| 17 | Mongo Device model field is `serial_number`, not `serial` | MongoEngine `Device.objects(serial_number=...)` maps to db field `serial_number` |
 
 ### Infrastructure
 
@@ -307,6 +311,10 @@ chmod 600 /etc/caddy/env
 `/etc/caddy/Caddyfile`:
 
 ```caddyfile
+{
+    default_sni your-epc.example.com
+}
+
 your-epc.example.com {
     tls {
         dns cloudflare {env.CF_API_TOKEN}
@@ -320,7 +328,32 @@ your-epc.example.com {
     }
     encode gzip
 }
+
+# Catch-all for AP connections by IP (Host header won't match the hostname block)
+:443 {
+    tls internal
+    handle /device/* {
+        reverse_proxy 127.0.0.1:8081
+    }
+    handle {
+        reverse_proxy 127.0.0.1:8080
+    }
+}
+
+:80 {
+    handle /device/* {
+        reverse_proxy 127.0.0.1:8081
+    }
+    handle {
+        reverse_proxy 127.0.0.1:8080
+    }
+}
 ```
+
+`default_sni` is required because APs connect by raw IP (no SNI hostname).
+The `:443` catch-all with `tls internal` handles the HTTP routing for those
+requests — without it, Caddy completes the TLS handshake but drops the
+request with status 0.
 
 Create a systemd unit with `User=caddy`, `EnvironmentFile=/etc/caddy/env`,
 `AmbientCapabilities=CAP_NET_BIND_SERVICE`. Then:
@@ -335,7 +368,115 @@ the hostname only resolves on your LAN.
 > **Note:** After recreating `epc-api`, the license cron resets — re-disable it
 > (§3.6 step 2) or `fitregister.enable` reverts to false within a minute.
 
-## 7. Backend access
+## 7. Device adoption
+
+### 7.1 Bypass HMAC signature check
+
+The check-in handler validates an HMAC-SHA256 signature on every AP request.
+The AP computes the signature using `mac.lower() + serial_number + "0@ne$"` as
+the HMAC key over `auth_header + url_path + body`. The EPC-side verification
+fails because the message format doesn't match between AP firmware and EPC
+code. Patch the bytecode to bypass:
+
+```bash
+docker exec epc-api python3 << 'PYEOF'
+import marshal, struct, types, shutil
+
+path = "/app/pkg/general/chicken.pyc"
+shutil.copy2(path, path + ".bak")
+
+with open(path, "rb") as f:
+    data = f.read()
+
+header, code = data[:16], marshal.loads(data[16:])
+new_bc = bytes([100, 1, 83, 0])  # LOAD_CONST True; RETURN_VALUE
+
+def patch(co):
+    consts = list(co.co_consts)
+    changed = False
+    for i, c in enumerate(consts):
+        if isinstance(c, types.CodeType):
+            if c.co_name in ("valid_signature", "valid_signature_ex"):
+                consts[i] = c.replace(co_code=new_bc, co_consts=(None, True), co_stacksize=1)
+                changed = True
+            else:
+                r = patch(c)
+                if r is not c:
+                    consts[i] = r
+                    changed = True
+    return co.replace(co_consts=tuple(consts)) if changed else co
+
+with open(path, "wb") as f:
+    f.write(header)
+    marshal.dump(patch(code), f)
+PYEOF
+
+docker restart epc-api
+```
+
+### 7.2 Register a device
+
+After the signature bypass, register the device in both Mongo and Redis.
+The check-in flow checks Mongo first (`Device.objects(serial_number=...)`),
+then Redis (`device/<mac_lowercase>`).
+
+```bash
+source /epc/pipe/.epc-prod
+
+# 1. Insert into Mongo (field must be serial_number, not serial)
+docker exec epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
+  --authenticationDatabase admin main --eval '
+  db.devices.insertOne({
+    type: "ap", series: "cloud",
+    name: "<device-name>",
+    model: "<model>",
+    serial_number: "<serial>",
+    mac: "<MAC>",
+    org_id: "<org_id>",
+    network_id: "<network_id>",
+    hierarchy_view_id: "<network_id>",
+    is_sync_config: false,
+    is_config_up_to_date: false,
+    created_time: new Date(),
+    modified_time: new Date()
+  })'
+
+# 2. Seed Redis (MAC must be lowercase)
+docker exec epc-db redis-cli -a "$REDIS_PASS" HMSET "device/<mac_lower>" \
+  mac "<mac_lower>" sn "<serial>" serial_number "<serial>" \
+  org_id "<org_id>" falcon_nid "<network_id>" network_id "<network_id>" \
+  model "<model>" type "ap" name "<device-name>" \
+  secret "preshared_initial" status "online" \
+  config_version "" checkin_reply "" config_compressed "" \
+  is_sync_config "false" is_in_trial_zone "false" \
+  series "cloud" wan_ip "" device_id "<mongo_objectid>"
+
+# 3. Re-disable license crons (container restart re-enables them)
+docker exec epc-api sh -c \
+  'crontab -l | sed "s|^\(\*/1.*--fitregister\)|# \1|;s|^\(\*/1.*--license\)|# \1|" | crontab -'
+
+# 4. Re-enable fitregister
+docker exec epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
+  --authenticationDatabase admin main --eval \
+  'db.fitregister.updateOne({}, {$set: {enable: true}})'
+```
+
+### 7.3 Point the AP at the controller
+
+```bash
+curl -sk -u admin:admin -X POST "https://<ap-ip>/api/mgm/force_ac" \
+  -H "Content-Type: application/json" \
+  -d '{"force_ac_ip": "<epc-ip>", "force_ac_port": 443}'
+```
+
+The AP starts checking in every ~12 seconds. Verify with:
+
+```bash
+tail -f /var/log/caddy/access.log | grep checkin
+```
+
+## 8. Backend access
+
 
 Credentials are in plaintext at `/epc/pipe/.epc-prod`:
 
@@ -350,7 +491,7 @@ docker exec -it epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
   --authenticationDatabase admin main
 ```
 
-## 8. Source of truth
+## 9. Source of truth
 
 - Installer: `http://engenius-epc.s3.us-west-2.amazonaws.com/dev/<version>/epc.sh`
 - Package (compose + configs): `.../dev/<version>/epc-pkg.tar.gz`
@@ -358,7 +499,7 @@ docker exec -it epc-db mongo -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
 - ARM/FitController installer: `https://epc-release.s3.us-west-2.amazonaws.com/epc-prod.sh`
 - Docs: https://doc.engenius.ai/home-epc-quick-start-guide
 
-## 9. See also
+## 10. See also
 
 - [EPC on Podman/AlmaLinux](epc-podman-almalinux.md) — the full Podman port (lab use)
 - [Backend access](backend-access.md) — MongoDB + Redis shell access
