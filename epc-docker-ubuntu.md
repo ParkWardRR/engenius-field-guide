@@ -1,8 +1,9 @@
-# Running EnGenius Private Cloud (EPC) on Docker / Ubuntu
+# Running EnGenius Private Cloud (EPC) on Docker
 
-Field notes for deploying **EPC 1.9.0** on **Docker CE / Ubuntu 24.04** — the
-vendor-supported runtime. This is the **simpler, more stable** alternative to
-the [Podman/AlmaLinux path](epc-podman-almalinux.md), which we ran in
+Field notes for deploying **EPC 1.9.0** on **Docker CE**. Tested on
+**Ubuntu 24.04** and **AlmaLinux 10.2** (SELinux Enforcing) — the Docker
+commands are identical on both. This is the **simpler, more stable** alternative
+to the [Podman/AlmaLinux path](epc-podman-almalinux.md), which we ran in
 production for four months before switching (see §5 for the post-mortem).
 
 > If you followed the Podman guide first and it worked in your lab, great —
@@ -20,7 +21,7 @@ Docker needs **zero** — the vendor compose works as-is.
 |---------|--------|--------|
 | Container DNS | `127.0.0.11` (matches the shipped nginx.conf) | `10.89.0.1` (requires nginx patch) |
 | Docker socket | Native | Symlink `podman.sock` → `docker.sock` |
-| SELinux volume labels | Not needed (Ubuntu default: AppArmor) | Required: `container_file_t` fcontext + `:z` + `label=disable` |
+| SELinux volume labels | Not needed — Docker handles SELinux natively (no fcontext, no `:z`, no `label=disable`) | Required: `container_file_t` fcontext + `:z` + `label=disable` |
 | Compose compatibility | `docker compose` plugin (native) | `podman-compose` (behavioral differences) |
 | `epc.sh` installer | Works directly | Requires `ENVIRONMENT=1` + `-it` removal + shims |
 
@@ -28,10 +29,10 @@ Docker needs **zero** — the vendor compose works as-is.
 
 | Setting | Value |
 |---------|-------|
-| OS | Ubuntu 24.04 LTS (cloud-init image) |
+| OS | Ubuntu 24.04 LTS or AlmaLinux 10.x |
 | CPU | 8 vCPU, `cpu: host` |
 | RAM | 16 GB ceiling / 8 GB balloon floor |
-| Disk | 64 GB thin on NVMe, `ssd=1,discard=on` |
+| Disk | 64 GB boot + optional app volume for OS-reinstall resilience |
 | NIC | virtio |
 | Machine type | q35, `--vga std` |
 | `onboot` | **1** — critical, the default is 0 and the VM won't autostart |
@@ -40,7 +41,7 @@ For official sizing, see [the Podman guide §2](epc-podman-almalinux.md#2-offici
 
 ## 3. Deploy procedure
 
-### 3.1 Prerequisites
+### 3.1 Prerequisites (Ubuntu)
 
 ```bash
 sudo apt-get update && sudo apt-get install -y curl wget net-tools
@@ -64,6 +65,44 @@ for i in agent api db raccoon otter mdns radius; do
   sudo docker pull public.ecr.aws/d3g4m7o9/epc-$i:$EPC_VER
 done
 ```
+
+### 3.1b Prerequisites (AlmaLinux 10.x)
+
+```bash
+sudo dnf install -y curl wget net-tools tar
+
+# Docker CE (official repo — do not use Podman)
+sudo dnf config-manager addrepo --from-repofile=https://download.docker.com/linux/rhel/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo systemctl enable --now docker
+
+# docker-compose standalone
+sudo ln -sf /usr/libexec/docker/cli-plugins/docker-compose \
+  /usr/local/bin/docker-compose
+
+# sudo secure_path doesn't include /usr/local/bin
+echo 'Defaults secure_path = /sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin' \
+  | sudo tee /etc/sudoers.d/secure_path
+
+# host directories
+sudo mkdir -p /epc /root/cert \
+  /srv/docker/mongodb/data/db /srv/docker/redis \
+  /var/log/epc/{mongodb,redis,nginx,gunicorn,api,raccoon,otter,agent}
+
+# firewall
+sudo firewall-cmd --permanent --add-service={http,https}
+sudo firewall-cmd --permanent --add-port={1812-1813/udp,3799/udp,8080/tcp}
+sudo firewall-cmd --reload
+
+# pre-stage images
+EPC_VER=1.9.0
+for i in agent api db raccoon otter mdns radius; do
+  sudo docker pull public.ecr.aws/d3g4m7o9/epc-$i:$EPC_VER
+done
+```
+
+SELinux stays **Enforcing** — Docker CE handles container labels natively (no
+`fcontext`, no `:z`, no `label=disable`). No SELinux workarounds needed.
 
 ### 3.2 Installer
 
@@ -216,6 +255,9 @@ The dashboard should show "Everything is OK!" with empty device counts.
 |---|-------|-----|
 | I1 | Proxmox `onboot=0` (default) — VM doesn't autostart | `qm set <vmid> --onboot 1` immediately after creation |
 | I2 | Proxmox `--vga serial0` — noVNC blank | Use `--vga std`; delete serial0 device |
+| I3 | Caddy exit 203 on AlmaLinux (SELinux) | `xcaddy build` in home dir → binary has `user_home_t` context. Fix: `sudo restorecon -v /usr/local/bin/caddy` (relabels to `bin_t`) |
+| I4 | `sudo: docker-compose: command not found` on AlmaLinux | sudo's `secure_path` doesn't include `/usr/local/bin`. Fix: create `/etc/sudoers.d/secure_path` (see §3.1b) |
+| I5 | Mongo `redis_device` fields must be strings | `device_pairing`, `config_version`, `expired_date` as ints → `DataError` on epc-api startup. Use strings |
 
 ## 5. Why we moved off Podman — a post-mortem
 
