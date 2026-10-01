@@ -32,10 +32,11 @@ missing manual: tested, no-fluff, straight to the commands.
 
 ## What you can do with it
 
-🖥️ **Run the controller yourself.** Deploy EnGenius Private Cloud (EPC) as
-Podman containers on AlmaLinux — hardened, SELinux **Enforcing**, reboot-proof —
+🖥️ **Run the controller yourself.** Deploy EnGenius Private Cloud (EPC) on
+Docker/Ubuntu (recommended) or Podman/AlmaLinux (SELinux Enforcing, lab use),
 or run the Fit Controller stack on a Raspberry Pi. No appliance, no cloud.
-→ [EPC on Podman/AlmaLinux](epc-podman-almalinux.md) ·
+→ [EPC on Docker/Ubuntu](epc-docker-ubuntu.md) ·
+[EPC on Podman/AlmaLinux](epc-podman-almalinux.md) ·
 [Fit Controller on ARM](self-hosting-fitcon-arm.md)
 
 📡 **Adopt devices the controller rejects.** That "unsupported" AP usually works
@@ -65,6 +66,9 @@ Fully worked, evidence-based, start-to-finish:
   flashing, reading firmware off-box, and why *adoption* (the blank-serial trap —
   the controller keys devices by serial, and a crossflash reports `sn=0000`) is
   the real gate.
+- **[EPC on Docker/Ubuntu](epc-docker-ubuntu.md)** — the simpler, production-stable
+  path: full deploy, post-init steps, gotchas, and a post-mortem on why Podman
+  failed in production after four months.
 - **[EPC on Podman/AlmaLinux](epc-podman-almalinux.md)** — the full 7-container
   deploy (1.8.8–1.9.1), the Docker-socket → podman-socket port, SELinux Enforcing,
   the device-onboarding agent + pipes + the serial-keyed check-in flow, and the
@@ -75,7 +79,9 @@ Fully worked, evidence-based, start-to-finish:
 
 | Your goal | Go to |
 |-----------|-------|
-| Self-host a controller | [landscape](landscape.md) → [EPC on x86](epc-podman-almalinux.md) or [Fit Controller on ARM](self-hosting-fitcon-arm.md) |
+| Self-host a controller (recommended) | [landscape](landscape.md) → [EPC on Docker/Ubuntu](epc-docker-ubuntu.md) |
+| Self-host with SELinux Enforcing (lab) | [EPC on Podman/AlmaLinux](epc-podman-almalinux.md) |
+| Self-host on ARM | [Fit Controller on ARM](self-hosting-fitcon-arm.md) |
 | Adopt a device the controller rejects | [whitelist the model](add-unknown-models.md) or [cross-flash it](crossflash-ews377apv3-walkthrough.md) |
 | Ditch the vendor firmware entirely | [OpenWrt on the EWS377AP v3](openwrt-ews377apv3.md) |
 | Decode/generate a serial | [serial-numbers](serial-numbers.md) |
@@ -87,6 +93,7 @@ Fully worked, evidence-based, start-to-finish:
 |-----|--------|
 | [overview](overview.md) | Product lines and which controller manages what |
 | [landscape](landscape.md) | ezMaster vs Fit Controller/EPC; device compatibility |
+| [epc-docker-ubuntu](epc-docker-ubuntu.md) | EPC 1.9.0 on Docker/Ubuntu — recommended for production (incl. Podman post-mortem) |
 | [epc-podman-almalinux](epc-podman-almalinux.md) | EPC 1.8.8–1.9.1 as Podman containers on AlmaLinux (incl. device onboarding + adoption patches) |
 | [self-hosting-fitcon-arm](self-hosting-fitcon-arm.md) | Fit Controller stack on ARM / Raspberry Pi |
 | [backend-access](backend-access.md) | MongoDB + Redis access |
