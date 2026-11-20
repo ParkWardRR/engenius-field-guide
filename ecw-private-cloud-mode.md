@@ -60,6 +60,33 @@ the controller by mDNS), populates `fit_con_address`, and begins hitting
 onboarding (register the device, push config) — see
 [EPC on Docker](epc-docker-ubuntu.md) §7.
 
+### An unknown device adds itself to Pending Approval
+
+A device the controller does **not** know checks in, gets **`404`**, and
+`handle_auth_request` calls `add_pending_device`, writing a Redis hash:
+
+```
+pending → <serial>  {"model":"ECW336","type":"ap","mac":"…","sn":"…","ip":…,"timestamp":…}
+```
+
+That is the queue behind *Inventory → Register Devices → Pending Approval*.
+Verified 2026-11-20: a freshly flashed ECW336 in `cloud_id=3` mode populated it
+by itself, with the model correctly identified, **no manual DB seeding**.
+Approve in the UI and the normal secret-negotiation / config-apply cycle runs.
+
+Note the two failure codes separate cleanly, and looking for `pending` keys
+while a device is already hand-written into Mongo finds nothing — a device that
+*is* found never goes to pending:
+
+| code | meaning | where the device goes |
+|---|---|---|
+| `404` | serial not in Mongo/Redis | **added to `pending`** → approve in UI |
+| `463` | found, but its signing secret ≠ the stored one | stuck; fix the record |
+
+**Prefer the pending/approve path over hand-seeding.** A hand-seeded device can
+reach `200` check-ins and still never complete the config-apply/report loop
+(`is_config_up_to_date` stays empty).
+
 ### Check-in status codes you'll see
 
 The controller's check-in handler returns these (from `chicken.pyc`); knowing
