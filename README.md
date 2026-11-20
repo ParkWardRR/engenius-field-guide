@@ -95,9 +95,9 @@ Fully worked, evidence-based, start-to-finish:
 | [landscape](landscape.md) | ezMaster vs Fit Controller/EPC; device compatibility |
 | [epc-docker-ubuntu](epc-docker-ubuntu.md) | EPC 1.9.0 on Docker (Ubuntu or AlmaLinux) — recommended for production (incl. Podman post-mortem) |
 | [epc-podman-almalinux](epc-podman-almalinux.md) | EPC 1.8.8–1.9.1 as Podman containers on AlmaLinux (incl. device onboarding + adoption patches) |
-| [ecw-private-cloud-mode](ecw-private-cloud-mode.md) | ECW cloud APs: `cloud_id=3` is what actually routes an AP to a private controller (why `force_ac`/mDNS are ignored otherwise); check-in codes; config-delivery debounce; 6 GHz/WPA3 gating |
+| [ecw-private-cloud-mode](ecw-private-cloud-mode.md) | ECW cloud APs: `cloud_id=3` is what routes an AP to a private controller, and **UART is the only way to set it** (SSH starts but every account is refused); `force_ac` afterwards for discovery without mDNS or a cable move; check-in codes; config-delivery debounce; 6 GHz/WPA3 gating, **proven on air** |
 | [self-hosting-fitcon-arm](self-hosting-fitcon-arm.md) | Fit Controller stack on ARM / Raspberry Pi |
-| [backend-access](backend-access.md) | MongoDB + Redis access |
+| [backend-access](backend-access.md) | MongoDB + Redis access; EPC 1.10 changes (`mongosh`, `--authenticationDatabase admin`, plural collections); minting an API token when no admin password is stored; register/assign a device over the API |
 | [add-unknown-models](add-unknown-models.md) | Whitelist an unsupported model |
 | [custom-https-cert](custom-https-cert.md) | Replace the controller's TLS cert |
 | [serial-numbers](serial-numbers.md) | Serial format + Code27 check char |

@@ -35,13 +35,30 @@ Value **`3` = "Private Cloud"** (the full map: `0` prod, `1` staging, `2` dev,
 `3` private, `4`/`5`/`6` fit prod/staging/dev).
 
 ```sh
-# From a root shell on the AP (preferred — also sets uci ezmcloud.minicloud=1):
-cloudmode.sh 3 && reboot
-
-# Or from the u-boot CLI over UART (append-only; works even when the OS is locked):
+# From the u-boot CLI over UART — in practice the ONLY way on a stock cloud
+# unit (append-only; works even when the OS is locked):
 setenv cloud_id 3
 saveenv
+
+# If you somehow have a root shell, this also sets uci ezmcloud.minicloud=1:
+cloudmode.sh 3 && reboot
 ```
+
+> **You will not get that root shell on a stock ECW build — UART is mandatory.**
+> Verified on ECW336 fw `1.8.118-12`: `POST /api/mgm/ssh {"enable":true}`
+> genuinely starts dropbear (port 22 opens, banner `SSH-2.0-dropbear`, a real
+> change from older ap-hk07 builds where the daemon never started) — but **every
+> login is refused**: `root` → `"Not support for root account."`, `admin` →
+> `"Not support for admin account."` It is not a passwd problem, since
+> `/etc/passwd` gives both uid 0 and `/bin/ash`; the firmware patches the SSH
+> auth path to whitelist neither.
+>
+> Nor is there an API substitute: `senao-openapi-server` dispatches to
+> `ezmconfig`, which exports `get_cloudmode` (read-only) and the SSH toggle but
+> **no cloud-mode setter**, and `/api/mgm/force_ac` returns
+> `404 API URL NOT MATCH` on a stock unit because that handler lives in
+> `www/cgi-bin/api.fcgi` — the *lighttpd/LSP* stack, which is inactive while the
+> unit is in cloud mode. Budget one UART session per unit.
 
 **Verify the env is still COMPLETE after `saveenv`** — `ethaddr`, `sn`,
 `snextra`, `hw_id` all present. On some ECW/FIT units the real MAC exists *only*
@@ -59,6 +76,35 @@ the controller by mDNS), populates `fit_con_address`, and begins hitting
 `/api/v1/checkin` on the controller. From there it's the normal self-hosted
 onboarding (register the device, push config) — see
 [EPC on Docker](epc-docker-ubuntu.md) §7.
+
+### `force_ac` becomes settable here — and it removes the cable shuffle
+
+Mode 3 also flips the web stack: `switch_lighttpd_lsp` enables the LSP GUI, so
+the route that 404'd on the stock unit now answers.
+
+```sh
+GET  /api/mgm/force_ac                    # -> {"ip": ""}
+POST /api/mgm/force_ac {"ip":"<epc-ip>"}  # -> 200, persists in UCI
+# reboot to make the cloud agent re-evaluate
+```
+
+`force_ac` does **two** jobs, both worth knowing:
+
+- `libcloud-init.sh:check_controller()` returns `1` when `cloud_mode=3` **or**
+  `uci ezmcloud.ezmcloud.force_ac` is non-empty — so it is itself a second,
+  independent door into the private-controller branch.
+- `minicloud-init.sh` assigns `ac_addr=$force_ac_addr` — it is also the
+  **controller address**.
+
+Practical payoff: provision second-hand units on an **isolated segment** (so
+they can never reach EnGenius Cloud before `cloud_id=3` is set), point them at
+the controller with `force_ac`, and they check in **directly** across a routed
+path. mDNS never has to cross the segment and the AP never has to be moved to
+the controller's L2. A firewall permitting only the controller IP plus UDP 123
+(NTP — the clock matters, see the `460` code below) is enough.
+
+Setting `force_ac` live does **not** take effect on its own: `check_controller`
+is evaluated when the cloud agent starts, so reboot after setting it.
 
 ### An unknown device adds itself to Pending Approval
 
@@ -129,9 +175,36 @@ log: the delivering check-in shows a non-zero `size`, then `0` on the next.
 
 6 GHz is gated by SSID security: ECW336 firmware v1.6.71 —
 *"Disable 6GHz radio if selected Wi-Fi encryption is not supported on the 6GHz
-band."* 6 GHz needs **WPA3-Personal (SAE)** or OWE with PMF; a WPA2-PSK SSID
-will not bring the third radio (`wifi2`) up, and the AP logs it skipping
-`enable radio wifi2`. Avoid WPA3/WPA2 *mixed* mode for first bring-up — v1.8.112
-fixed a bug where mixed mode wrongly disabled 6 GHz. In EPC the 6 GHz radio is a
-dedicated `ap_policy.radio_6g` field, **not** an entry in the `ap_policy.radios`
-list (whose `type` is limited to `2_4G`/`5G`/`5G-2`).
+band."* 6 GHz needs **WPA3-Personal (SAE)** or OWE with PMF. Avoid WPA3/WPA2
+*mixed* mode for first bring-up — v1.8.112 fixed a bug where mixed mode wrongly
+disabled 6 GHz. In EPC the 6 GHz radio is a dedicated `ap_policy.radio_6g`
+field, **not** an entry in the `ap_policy.radios` list (whose `type` is limited
+to `2_4G`/`5G`/`5G-2`); the SSID's band binding is a separate `type_6g`
+sub-object.
+
+**Confirmed working on air** (ECW336, fw `1.8.118-12`, EPC 1.10.0): a Wi-Fi 6E
+client associated on **channel 5 (6 GHz), 80 MHz, 802.11ax, WPA3-Personal**,
+`Country Code: US`, with 2.4 GHz and 5 GHz up at the same time. **No AFC grant
+was needed** — channel 5 is a 6 GHz **PSC** channel and Low-Power Indoor is
+sufficient, so don't go hunting for a power-mode setting first.
+
+Two traps, both of which cost real time:
+
+1. **An ineligible SSID bound to 6 GHz disables the radio** — and it does so
+   *even when* a separate WPA3 SSID is also bound to 6 GHz. Adding a WPA3 SSID
+   is not enough; the WPA2 one must come **off** the band.
+2. **`ap_policy.radio_6g` can silently fail to persist.** mongoengine hands back
+   a default-populated embedded document for an unset field, so
+   `if ap.radio_6g is not None` is True, `.save()` computes no delta, and
+   nothing is written — a naive check reports success while Mongo still has no
+   `radio_6g`. Verify against the raw collection and write it with pymongo
+   `$set`.
+
+A single SSID name across all three bands works well: same name and same
+passphrase, with WPA2-PSK bound to 2.4/5 GHz and WPA3-Personal bound to 6 GHz.
+Clients see one network and pick the band; older 2.4 GHz IoT gear keeps working.
+
+One stale observation to ignore: earlier notes read "the AP logs `enable radio`
+for `wifi0/1/3` but never `wifi2`, therefore 6 GHz is held down." That inference
+was **unsound** — the `wifiN`↔band mapping was never established, and three
+enabled radios is exactly what a working tri-band AP looks like.
