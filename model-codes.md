@@ -16,6 +16,7 @@ Private Cloud (EPC) `models` collection, so they're the controller's own values.
 | ECW230 | `X41` | cloud | AP |
 | ECW230v3 | `X42` | cloud | AP |
 | ECW230S | `V41` | cloud | AP |
+| ECW336 | `E4T` | cloud | AP (Wi-Fi 6E tri-band) |
 | EWS377APv2 | `X43` | neutron | AP |
 | EWS377APv3 | `X44` | neutron | AP |
 | EWS377-FIT | `X45` | fit | AP |
@@ -34,6 +35,14 @@ Note the sibling hardware **ECW230v3 (`X42`), EWS377-FIT (`X45`), and EWS377APv3
 (`X44`)** are the same board in three series — see
 [model-equivalence](model-equivalence.md). (Watch the `X41`/`X42` split: `X42` is
 ECW230**v3**; base ECW230 is `X41`.)
+
+Codes are not all `X__`: `V41`, `C42`, `XC3`, `E4T`, and the `R__`/`G__` switch
+codes show the first character varies. **ECW336 = `E4T`**, verified two ways —
+EPC 1.10.0's `models` collection (`"name":"ECW336","number":"E4T"`) and the
+position in a real unit's serial (`2290` + `E4T` + unit tail), the same slot
+EWS377-FIT uses for `X45`. Its firmware-header `product_id` is **291**, and the
+u-boot env packs both as `hw_id=01010123` (vendor `0x0101`=257, product
+`0x0123`=291).
 
 Confirm a device's own code by reading its serial. To find the code for a model
 already in the controller DB, query its `models` entry (see

@@ -95,6 +95,7 @@ Fully worked, evidence-based, start-to-finish:
 | [landscape](landscape.md) | ezMaster vs Fit Controller/EPC; device compatibility |
 | [epc-docker-ubuntu](epc-docker-ubuntu.md) | EPC 1.9.0 on Docker (Ubuntu or AlmaLinux) — recommended for production (incl. Podman post-mortem) |
 | [epc-podman-almalinux](epc-podman-almalinux.md) | EPC 1.8.8–1.9.1 as Podman containers on AlmaLinux (incl. device onboarding + adoption patches) |
+| [ecw-private-cloud-mode](ecw-private-cloud-mode.md) | ECW cloud APs: `cloud_id=3` is what actually routes an AP to a private controller (why `force_ac`/mDNS are ignored otherwise); check-in codes; config-delivery debounce; 6 GHz/WPA3 gating |
 | [self-hosting-fitcon-arm](self-hosting-fitcon-arm.md) | Fit Controller stack on ARM / Raspberry Pi |
 | [backend-access](backend-access.md) | MongoDB + Redis access |
 | [add-unknown-models](add-unknown-models.md) | Whitelist an unsupported model |
