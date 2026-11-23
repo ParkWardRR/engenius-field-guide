@@ -202,3 +202,52 @@ rebuilding a clean record is enough to make it re-pair:
 The AP then re-pairs on its next check-in, walking `404 → 463 → 200`. A transient
 `463` is **normal** mid-pairing, not a failure — only a `463` that persists past
 a couple of check-in intervals means anything.
+
+### Renaming devices and networks, and where a "room" label goes
+
+Ask the running app for its route table rather than guessing — this saved a lot
+of 405s:
+
+```bash
+docker exec epc-api python3 -c "
+import sys; sys.path.insert(0,'/app')
+import main
+for r in main.app.routes:
+    m=getattr(r,'methods',None)
+    if m: print(','.join(sorted(m)), r.path)
+"
+```
+
+Two traps it exposes:
+
+- **AP updates live under an extra `/aps/` segment.** Renaming is
+  `PATCH /orgs/{org}/hvs/{hv}/networks/{net}/devices/aps/{device_id}`. The
+  sibling `/devices/{device_id}` is **DELETE-only** — PATCH and PUT there both
+  answer `405 Method Not Allowed`, and so does every method on the `/devices`
+  collection. Switches and gateways have their own
+  `/devices/switches/{id}` and `/devices/gateways/{id}` PATCH routes.
+- Network rename is `PATCH /orgs/{org}/hvs/{hv}/networks/{network_id}` with
+  `{"name": "..."}`. It propagates to every device's `network_name`. Note
+  `network.pyc` carries a `BLOCKED_ROOT_NAME` constant, so some names are
+  refused.
+
+Body is a plain object (not the bare array that register/assign want):
+
+```bash
+curl -sk -X PATCH ".../devices/aps/$DEV" -H "Authorization: Bearer $TOK" \
+     -H 'Content-Type: application/json' \
+     -d '{"name":"LivingRoomAP","description":"Living room"}'
+```
+
+**There is no tag or label field on a device.** The schema is `name`, `model`,
+`mac`, `serial_number`, `description`, … — so a location/room belongs in
+**`description`**, which renders in the device list. If you need real grouping,
+the only structural tool is the hierarchy: org → hierarchy view → network.
+
+Renaming a device **bumps its config version and triggers a push**, so expect
+`is_config_up_to_date: false` for a minute afterwards and an offline unit to
+stay false until it next checks in. That is normal, not a failed rename.
+
+Keep EPC's device names identical to the DHCP/DNS reservations. Matching the two
+means a name in the controller, a lease, and a DNS record all refer to the same
+box, which is what makes "which AP is this?" answerable at 2am.
