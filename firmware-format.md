@@ -67,12 +67,25 @@ The value is the firmware-header product id — **not** the 3-char serial
 | `282` | EWS377AP v3 | **cross-flash sibling** |
 | `284` | ECW230v3 | **cross-flash sibling** |
 | `285` | ECW230S | related cloud AP (extra scanning radio); not a verified cross-flash target |
+| `291` | ECW336 | **different board** (`ap-hk01-c6`) — same container, not a cross-flash target |
 | `300` | EWS377-FIT | **cross-flash sibling** |
 
 The three **siblings** (`282`/`300`/`284`) are the same `ap-hk07` board in three
 series — the one-field re-head swaps between them. Note the older EWS377APv3
 build `v3.8.2.2` carries the model string `EWS377AP` (no `v3`) yet still reports
 `product_id 282`, so identify by the id, not the string.
+
+**`291` is in the table to be recognised, not to be flashed.** The ECW336's
+images parse identically — same `vendor_id 257`, same plaintext header, same
+offsets — but it is a different board
+([model-equivalence](model-equivalence.md#ecw336--same-soc-not-the-same-board)),
+so a re-head in either direction produces an image whose payload describes the
+wrong hardware. Its id is corroborated twice over: stable at `0x08` from
+firmware `1.6.67-1` through `1.8.118-12`, and a live unit's u-boot env packs the
+same number as `hw_id=01010123` — vendor `0x0101` (257) + `0x0123` (291). That
+agreement is itself unusual: on the EWS377-FIT `hw_id`'s low half is `0x012B`
+(299) while the header says 300, so do not assume the two numbering spaces line
+up.
 
 ## On-device validation
 
@@ -94,28 +107,63 @@ the check must be forced/patched. That header gate, plus per-device secrets like
 the [`cert` partition](cross-flashing.md), is what makes a crossflash more than
 just writing a `.bin`.
 
-## Integrity fields are proprietary (re-heading caveat)
+## The payload is XOR-obfuscated, not encrypted
 
-`mksenaofw` reads and re-encodes the header structure, but the **`md5sum` and
-`chksum` in stock EnGenius images are not reproducible** from the OpenWRT tool's
-formulas. Verified against `EWS377APv3-v3.9.3.2` and `ews377-fit-1.0.4-3`:
+An earlier version of this page concluded the payload was **encrypted**, because
+the header `md5sum` matched no slice of the stored bytes. That was the right
+observation and the wrong inference. The payload is obfuscated with a plain
+**8-byte repeating XOR**:
 
-- `md5sum` (`0x28`) does **not** equal MD5 of the stored payload (`file[146:]`)
-  for any offset/length slice tested — the payload is **encrypted**, and the
-  hash is over the plaintext (computed pre-encryption / pre-header).
-- `chksum` (`0x58`) does **not** match a byte-sum of the header (± CAPWAP), nor a
-  16-bit one's-complement fold, nor a whole-image sum — the vendor uses a
-  checksum the public tool doesn't implement.
+```
+key   = 783c9ecf67b359ac        # key[i % 8], phase 0 from the payload start
+```
 
-Consequences for anyone trying to **re-head** a donor image (patch `product_id` +
-`model` so the target accepts it):
+De-obfuscate it and you get an ordinary **u-boot FIT image** — no decryption, no
+per-model key, nothing device-side. The header itself stays plaintext, which is
+exactly why the file *looks* opaque and why scanning a stock `.bin` for `UBI#`
+or gzip magic finds nothing.
 
-- The donor `md5sum` stays valid *as long as you leave the payload untouched* —
+The tell, if you ever meet an unfamiliar image: runs of `0x00` in the plaintext
+surface the key repeating verbatim. Look around offset `0xA0`.
+
+```python
+key = bytes.fromhex("783c9ecf67b359ac")
+raw = open("stock.bin", "rb").read()
+hdr = 0x88 + model_len                      # header stays plaintext
+fit = bytes(b ^ key[i % 8] for i, b in enumerate(raw[hdr:]))
+# fit now starts with the FDT magic d0 0d fe ed
+```
+
+It is the **same key** OpenWrt's `senao-header` build step uses (`-m
+783c9ecf67b359ac` in `ipq807x.mk`) — so one key covers both stock vendor images
+and community-built ones.
+
+**This resolves the `md5sum` puzzle.** `md5sum` (`0x28`) is the MD5 of the
+*de-obfuscated* FIT, which is why it never matched the stored payload. Verified
+on ECW336 `1.8.118-12`: the de-obfuscated FIT's MD5 equals the header's own
+`md5sum` field exactly. So the hash is checkable with public tooling after all —
+de-obfuscate first, then hash.
+
+`chksum` (`0x58`) remains unexplained: it matches no byte-sum of the header
+(± CAPWAP), no 16-bit one's-complement fold, and no whole-image sum.
+
+### Consequences for re-heading
+
+- The donor `md5sum` stays valid as long as you leave the payload untouched —
   it covers the payload, not the header you're editing.
-- You **cannot** recompute a vendor-valid `chksum` with public tooling. A pure
-  header patch only works if the target's upgrade check ignores `chksum` (only
-  gates on magic + `product_id` + `model` + `md5sum`). Confirm that in the
-  device's `senao_image_header_check` before relying on it.
-- Even an accepted re-headed image may not boot: the encrypted payload is
-  decrypted on-device, so a donor payload keyed to a different model can fail to
-  decrypt/boot. This is a separate failure mode from the header gate.
+- You still **cannot** recompute a vendor-valid `chksum`. A pure header patch
+  works only if the target's upgrade check ignores it (gating on magic +
+  `product_id` + `model` + `md5sum`). Confirm that in the device's
+  `senao_image_header_check` before relying on it.
+- **Drop the "it may fail to decrypt" worry — and replace it with a real one.**
+  There is no decryption step to fail. The actual failure mode is that the
+  payload is a *complete, correct image for the donor's hardware*: it carries
+  the donor's DTS model, `qcom,ath11k-calibration-variant` and Wi-Fi
+  `board-2.bin`. Re-headed onto a true sibling that is survivable (wrong model
+  reported, radios on the donor's RF data — fine for a test, not a release).
+  Re-headed across **boards** it is not: the image describes the wrong ethernet
+  topology and PHYs, so the unit can boot perfectly and simply have no network.
+  See [model-equivalence](model-equivalence.md#ecw336--same-soc-not-the-same-board).
+- **Read the embedded `flash.scr` rather than guessing offsets.** The FIT
+  carries the vendor's own flash script, which is the authoritative offset
+  reference for that image; it gates on `machid` and `soc_hw_version`.

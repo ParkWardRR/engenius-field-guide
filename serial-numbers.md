@@ -15,6 +15,28 @@ X X X X  M M M  Y Y Y Y  C
 - Positions 5–7 (`MMM`): the 3-char [model code](model-codes.md).
 - Position 12 (`C`): Code27 check char over the first 11 characters.
 
+The leading 4 are often a date-ish code (`YYWW`), but nothing depends on that —
+treat them as free. And **do not assume the model code starts with `X`**: the
+EWS377/ECW230 line's `X4n` codes make that look like a rule, while the ECW336's
+is `E4T` and the switches use `R__`/`G__`. Match on positions, not on a prefix.
+
+One Code27 alphabet covers the whole line: the ECW336's own serial validates
+under exactly this math, so there is no per-series variant to hunt for.
+
+## Where it lives on the device
+
+On the cloud/FIT firmware the serial the controller sees is the u-boot env
+**`snextra`** (`setconfig` field 19), not `sn` — `sn` is frequently a
+placeholder like `000000001`. `snextra` is a 20-char field; FIT units store the
+12-char serial followed by eight `*`, while one ECW336's env held the bare
+12-char value with the padding unconfirmed, so read the model code by position
+rather than requiring a fixed length.
+
+Treat a serial as **credential material, not just an identifier**: on the ECW
+line the controller pre-shared key is derived from the unit's MAC and serial
+together ([ecw-private-cloud-mode](ecw-private-cloud-mode.md)). A `printenv`
+paste that includes both is a key disclosure.
+
 ## Code27 check
 
 1. Sum the ASCII value of each of the 11 preceding chars.

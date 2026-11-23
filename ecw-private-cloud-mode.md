@@ -150,6 +150,18 @@ A freshly-seeded device signs with its pre-shared key
 `lower(mac) + snextra + "0@ne$"` (note: `snextra`, not `sn`), so its controller
 record must let that validate before check-in flips to `200`.
 
+Concretely, what clears a `463`: the device's Redis record
+(`device/<mac_lower>`) must carry `secret=preshared_initial` — the placeholder
+that tells the controller to validate the AP's **pre-shared-key** signature
+rather than compare against an already-negotiated secret. With that in place the
+check-in goes to a steady `200`/online. And note the codes are checked in order,
+so a `463` means the timestamp and the signature both passed: the mismatch
+really is the stored secret, not the clock or the key derivation.
+
+Because that key is derived from the MAC and the serial, those two values
+together **are** the credential — a `printenv` paste that includes both is a key
+disclosure, not just an identity leak.
+
 ### Config-delivery debounce (why a pushed config sometimes isn't sent)
 
 Config is delivered in the check-in *response*, but `Chicken.get_checkin_reply`

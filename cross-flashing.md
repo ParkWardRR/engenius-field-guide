@@ -12,6 +12,25 @@ Only between models that share hardware — see
 [model-equivalence](model-equivalence.md). Even then, matching the OS
 image isn't always enough (see the `cert` partition below).
 
+**"Shares hardware" means the board, not the SoC.** The header gate is the only
+thing a re-head satisfies; the payload still describes the donor's board. Two
+models on the same Qualcomm SoC can differ in ethernet port mapping, PHYs and
+PCIe radios, and an image carrying the wrong set of those will often **boot
+normally and have no network** — a failure that looks like a cabling problem and
+sends you hunting in the wrong place. The ECW336 is the documented case: same
+IPQ8072A as the EWS377-FIT, same `machid`, same DT `model` string, same FIT
+config slot name, and still a different board
+([why](model-equivalence.md#ecw336--same-soc-not-the-same-board)). Before
+flashing, confirm the two DTBs' `compatible` strings match.
+
+The other half of "shares hardware" is whether there is a **way back**. Check
+before you start, because it varies inside one generation: the ap-hk07 units
+offered no network recovery at all (a reset-button hold at power-on triggered
+neither TFTP nor a web recovery, and the AP emitted zero packets at the u-boot
+console — UART was mandatory), while the ECW336's u-boot has a working TFTP
+recovery path on boot-menu option `2`. Never assume the sibling's recovery story
+transfers.
+
 ## Levels of difficulty
 
 1. **Firmware-only.** If the target accepts the donor image (its

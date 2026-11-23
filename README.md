@@ -40,9 +40,13 @@ or run the Fit Controller stack on a Raspberry Pi. No appliance, no cloud.
 [Fit Controller on ARM](self-hosting-fitcon-arm.md)
 
 📡 **Adopt devices the controller rejects.** That "unsupported" AP usually works
-fine — the controller just doesn't have it whitelisted. Add the model to its
-database, or cross-flash the device to a supported sibling.
-→ [Whitelist a model](add-unknown-models.md) ·
+fine. For an ezMaster-era device the controller genuinely doesn't have it
+whitelisted — add the model to its database, or cross-flash to a supported
+sibling. For an **ECW cloud AP, check the device first**: the blocker is normally
+the u-boot env `cloud_id`, not the model list, and until it is set the AP never
+even reads your controller settings.
+→ [ECW private-cloud mode](ecw-private-cloud-mode.md) ·
+[Whitelist a model](add-unknown-models.md) ·
 [Cross-flashing](cross-flashing.md) ·
 [EWS377AP v3 → Cloud/FIT walkthrough](crossflash-ews377apv3-walkthrough.md)
 
@@ -98,15 +102,15 @@ Fully worked, evidence-based, start-to-finish:
 | [ecw-private-cloud-mode](ecw-private-cloud-mode.md) | ECW cloud APs: `cloud_id=3` is what routes an AP to a private controller, and **UART is the only way to set it** (SSH starts but every account is refused); `force_ac` afterwards for discovery without mDNS or a cable move; check-in codes; config-delivery debounce; 6 GHz/WPA3 gating, **proven on air** |
 | [self-hosting-fitcon-arm](self-hosting-fitcon-arm.md) | Fit Controller stack on ARM / Raspberry Pi |
 | [backend-access](backend-access.md) | MongoDB + Redis access; EPC 1.10 changes (`mongosh`, `--authenticationDatabase admin`, plural collections); minting an API token when no admin password is stored; register/assign a device over the API |
-| [add-unknown-models](add-unknown-models.md) | Whitelist an unsupported model |
+| [add-unknown-models](add-unknown-models.md) | Whitelist an unsupported model — and how to tell first whether the model list is really the problem |
 | [custom-https-cert](custom-https-cert.md) | Replace the controller's TLS cert |
-| [serial-numbers](serial-numbers.md) | Serial format + Code27 check char |
+| [serial-numbers](serial-numbers.md) | Serial format + Code27 check char; where the serial lives on the device, and why it is credential material |
 | [model-codes](model-codes.md) | Known 3-char model codes |
-| [firmware-format](firmware-format.md) | Senao image header, mksenaofw, validation |
+| [firmware-format](firmware-format.md) | Senao image header, mksenaofw, validation; the payload is **XOR-obfuscated, not encrypted** (which is what the `md5sum` field actually covers) |
 | [cross-flashing](cross-flashing.md) | Flashing foreign firmware: reference (method + risks) |
 | [openwrt-ews377apv3](openwrt-ews377apv3.md) | Replace the vendor firmware with mainline-style OpenWrt (`ap-hk07` / IPQ8072A) |
 | [crossflash-ews377apv3-walkthrough](crossflash-ews377apv3-walkthrough.md) | Full worked EWS377AP v3 → Cloud/FIT conversion |
-| [model-equivalence](model-equivalence.md) | Which models share hardware |
+| [model-equivalence](model-equivalence.md) | Which models share hardware — read the DTB's `compatible`, since the model string, config slot name, `machid` and `board_id` all lie (the ECW336 case) |
 | [examples/epc-podman/](examples/epc-podman/) | Podman compose + env template |
 
 ## Scope

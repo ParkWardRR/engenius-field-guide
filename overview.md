@@ -47,3 +47,10 @@ Senao reuses the same boards across model names, so several "different" products
 are identical hardware. That's what makes cross-flashing possible — an older
 device can run a newer, controller-compatible sibling's firmware. Known pairs:
 [hardware/model-equivalence](model-equivalence.md).
+
+The reuse cuts the other way too, and that is the more expensive mistake: models
+can share a **SoC**, a `machid`, a device-tree `model` string and even a FIT
+config slot name while being different **boards**. The ECW336 matches an
+EWS377-FIT on all four and is not interchangeable with it. Establish equivalence
+from the DTB's `compatible` string, never from a family resemblance —
+[the ECW336 case](model-equivalence.md#ecw336--same-soc-not-the-same-board).
