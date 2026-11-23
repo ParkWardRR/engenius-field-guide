@@ -167,3 +167,24 @@ de-obfuscate first, then hash.
 - **Read the embedded `flash.scr` rather than guessing offsets.** The FIT
   carries the vendor's own flash script, which is the authoritative offset
   reference for that image; it gates on `machid` and `soc_hw_version`.
+- **Re-read it for every build, not just every model — the write length moves.**
+  Two ECW230v3 images differ:
+
+  | Build | `nand erase` | `nand write` length |
+  |---|---|---|
+  | 1.8.114-1 | `0x01000000` + `0x06f00000` | `0x027a0000` |
+  | 1.8.118-12 | `0x01000000` + `0x06f00000` | **`0x026a0000`** |
+
+  The erase ranges are identical and the subimage names are unchanged, so a
+  stale length looks plausible and is easy to carry forward by hand. Take it
+  from the script every time; the length always equals the carved subimage's own
+  size, which gives you a free cross-check.
+- **Verify with the FIT's own crc32 before and after writing.** Each `/images/*`
+  node carries a `hash@1` of `algo = crc32`, so you can confirm the bytes
+  end-to-end without trusting the transfer: compare the carved file, then u-boot
+  `crc32` over the loaded RAM image, then `nand read` the region back and
+  `crc32` it again. On ECW230v3 1.8.118-12 that value is `c6ec4258` for
+  `openwrt-ipq807x-ipq807x_32-ubi-root.img` (40 501 248 B) and `fc401bb9` for
+  `senao_wifi_fw_ubi_v2.img` (2 752 512 B). A read-back comparison is only valid
+  where no bad block falls inside the written range — `nand write`/`nand read`
+  both skip bad blocks, so check the erase log first.

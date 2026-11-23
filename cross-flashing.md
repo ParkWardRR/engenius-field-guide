@@ -127,6 +127,46 @@ Hardware v3 (FCC ID `A8J-EWS377APV3A`):
 3. Browse `http://192.168.1.1/`, log in `admin` / `admin`, set new credentials
    when prompted.
 
+## A cross-flashed unit loses the OEM local-upgrade path permanently
+
+Plan for this before you cross-flash, because it decides whether you ever need
+UART again. Once a unit runs another model's firmware, the GUI's
+"upgrade from local file" stops working — and it fails in a way that looks like
+your image is at fault when it is not.
+
+Measured on an EWS377-FIT running ECW230v3 1.8.114-1 (2026-11-23), authenticated
+as the controller-pushed local account:
+
+```
+POST /cgi-bin/upload.cgi
+-> 400 {"error_code":3,"error_message":"INVALID VALUE OF ARGUMENTS:firmware"}
+```
+
+The same response came back for **all** of: the correct ECW230v3 image under
+form field `file`, under `firmware`, under twelve other field names, a 2 KB junk
+file, and **no file part at all**. Auth is genuinely enforced (401 without a
+token), so the endpoint is reachable — it rejects before reading any content.
+The likely cause is that the handler validates the request against the board's
+own identity, which still reports the original model (`hw_id` here was
+`0101012B`, an EWS377-FIT value, while the firmware was ECW230v3).
+
+Consequences worth designing around:
+
+- **Do not count on the GUI, or on a controller push, to move a cross-flashed
+  unit between firmware versions.** Keep a console harness with the unit.
+- `u-boot` TFTP + `nand write` at the offsets from the target build's own
+  `flash.scr` remains the route that works, and it is unaffected by the
+  identity mismatch.
+- A controller-side firmware push is a separate question and was *not* available
+  either on the self-hosted EPC tested — its firmware-upgrade policy reported
+  `is_connect_license_expired: true` / `is_active: false`. Don't assume the
+  controller is the fallback.
+
+Corollary: **the thing that makes a cross-flash "finished" is not that it boots,
+it is that you can still update it.** Flash both A/B slots with the version you
+actually want while you have the console attached, rather than leaving one slot
+on an older build you can no longer reach.
+
 ## Full write-ups
 
 The detailed ENS620EXT↔ECW160 conversion, boot logs, and firmware analysis are in
