@@ -44,6 +44,37 @@ transfers.
    build (flash has no on-flash partition table). To change the layout you flash
    the donor's u-Boot **and** its env — the point of no return.
 
+## Identity is a separate axis from the image
+
+Flashing the sibling's firmware does not make the controller believe the unit is
+the sibling. Those are two independent changes, and a migration usually needs
+both:
+
+- **The image header gates the upload.** `product_id` (EWS377AP v3 `282`,
+  ECW230v3 `284`, EWS377-FIT `300`) is what the upgrade path checks — re-head
+  for that, within the board family only.
+- **The serial decides the model.** The controller reads the 3-char code at
+  serial positions 5–7; EPC maps it with `Code27Model` when registering
+  inventory, with no model field sent. Swapping those three characters (and
+  recomputing the check char) is the whole of the identity change — see
+  [migration serials](serial-numbers.md#migration-serials).
+
+Three consequences that cost time if you meet them cold:
+
+1. **The pre-shared key moves with the serial.** On the ECW line it is
+   `lower(mac) + sn + "0@ne$"`, so a re-stamped serial means a new key and a
+   controller record seeded with the new value
+   ([ecw-private-cloud-mode](ecw-private-cloud-mode.md)).
+2. **`cert` still holds the original identity** and stock firmware can write it
+   back over the env — only when the env MAC is the dummy `00:aa:bb:cc:dd:10` or
+   the serial starts `00000000`, but that is enough to make a re-stamp evaporate
+   after an env wipe. The both-valid case never compares the two, which is why a
+   re-stamp otherwise sticks.
+3. **The target code has to exist in the controller's table.** `X42`, `X44` and
+   `X45` all do; there is no `ECW230-FIT` code at all, so an ECW230v3 keeps
+   `X42` even after a FIT flash. For anything absent, see
+   [add-unknown-models](add-unknown-models.md).
+
 ## Getting a real root shell
 
 Stock SSH on ECW devices forces a restricted CLI. Run your own Dropbear on a
