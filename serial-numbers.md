@@ -32,6 +32,15 @@ placeholder like `000000001`. `snextra` is a 20-char field; FIT units store the
 12-char value with the padding unconfirmed, so read the model code by position
 rather than requiring a fixed length.
 
+A second copy lives in the `cert` partition, as an `SN/MAC/HWID` record that
+stock firmware's `uboot_protect.sh` syncs against the env at every boot. Worth
+knowing both when recovering a wiped env and when re-stamping a serial on
+purpose, since that restore path can silently undo one — conditions and limits
+in [ecw-private-cloud-mode](ecw-private-cloud-mode.md). Nothing *on* the device
+parses positions 5–7; the firmware treats the serial as an opaque string and it
+is the controller that derives the model from the code (EPC does it with
+`Code27Model`).
+
 Treat a serial as **credential material, not just an identifier**: on the ECW
 line the controller pre-shared key is derived from the unit's MAC and serial
 together ([ecw-private-cloud-mode](ecw-private-cloud-mode.md)). A `printenv`

@@ -61,9 +61,17 @@ cloudmode.sh 3 && reboot
 > unit is in cloud mode. Budget one UART session per unit.
 
 **Verify the env is still COMPLETE after `saveenv`** — `ethaddr`, `sn`,
-`snextra`, `hw_id` all present. On some ECW/FIT units the real MAC exists *only*
-in the env, so a corrupt/incomplete env is identity loss. Revert with
-`cloud_id 0`.
+`snextra`, `hw_id` all present. On some ECW/FIT units the env holds the only
+*live* copy of the real MAC (u-boot calls the ART copy invalid), so a
+corrupt/incomplete env is identity loss. Revert with `cloud_id 0`.
+
+There is a conditional second copy. `cert` carries an `SN/MAC/HWID` record, and
+stock firmware's `/usr/sbin/uboot_protect.sh` (run from `/etc/init.d/cloud_guard`)
+writes `setconfig` fields 6/9/19 back from it — but only when the env MAC is the
+dummy `00:aa:bb:cc:dd:10` or the serial starts `00000000`, and only while stock
+firmware is what boots (an OpenWrt'd unit has no `cloud_guard`). When both
+copies look valid it never compares them, so it corrects nothing subtler than a
+wipe. A backstop, not a backup.
 
 In mode 3 the AP **never contacts EnGenius Cloud**, which is also the clean way
 to handle a second-hand unit whose serial still sits in a previous owner's cloud
