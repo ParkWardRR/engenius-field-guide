@@ -183,16 +183,19 @@ a FIT unit the u-boot field is 20 chars — the serial plus eight `*`, e.g.
 ### With `quarry`
 
 ```sh
-quarry serial --model X45 --prefix 26A0 --suffix 111D    # -> 26A0X45111DR
+quarry serial  --model X45 --prefix 26A0 --suffix 111D   # -> 26A0X45111DR
+quarry snextra --model X45 --prefix 26A0 --suffix 111D   # -> 26A0X45111DR********
 ```
 
-`quarry serial` does the check character; it does **not** encode the sequence,
-so `--suffix` has to already be the four base-27 characters (`seq4()` above).
-Note its default `--suffix 0001` is not factory-shaped — `0` is not in the
-Code27 alphabet.
+`--suffix` passes the sequence field through verbatim, which is what a migration
+wants: copy the unit's own four characters across. To *number* a new unit
+instead, `--seq N` encodes the base-27 digits for you (`--seq 1` → `111D`),
+wrapping at 27⁴ like the vendor does. `snextra` emits the complete serial plus
+eight `*`, the shape a FIT unit's field 19 actually holds.
 
-`quarry snextra` is a different shape again: it emits
-`prefix + code + "0"-padding to 20` (e.g. `EPC1X420000000000000`), which has no
-12-char serial inside it and therefore no check character. The device's own
-`sncheck.sh` reports `NG` on it. For a migration, build the 12-char serial and
-pad it with eight `*` yourself.
+> Both commands used to fall short here and the surrounding docs described that:
+> `--suffix` defaulted to `0001`, which no factory serial can contain, and
+> `snextra` zero-padded `prefix + code` to 20 characters with no serial or check
+> character inside it (`sncheck.sh` on the device reads such a value as `NG`).
+> Fixed in `quarry` / `pelegrun` as of 2026-11-23 — if you are on an older
+> build, check what it emits before writing it to an env.
