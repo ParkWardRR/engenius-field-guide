@@ -171,3 +171,34 @@ Field-name trap: in the **policy** document an SSID's name is `name`;
 `ssid_name` only exists in the *generated* device config. Likewise the policy
 stores band bindings as `types` / `type_6g`, while the generated config uses
 `ssid_types`.
+
+### Never delete a live device record to free a licence
+
+The check-in secret is a **shared** value: the controller holds a copy and the AP
+holds a copy. Deleting a device record destroys the controller's copy, and the AP
+keeps signing with a secret nothing else knows — producing a `463
+INVALID_SECRET` / `462 INVALID_SIGNATURE` wall that looks like a firmware fault.
+There is also no reason to do it: devices run happily as
+`license_status: "expired"` (see above).
+
+If it has already happened, do **not** try to recover the old secret. The
+`Kaiwoo-signature` HMAC covers the POST body, which the reverse proxy does not
+log, so it cannot be brute-forced from access logs — and it does not need to be.
+An AP falls back to its initial pre-shared key once the controller rejects it, so
+rebuilding a clean record is enough to make it re-pair:
+
+1. Register the device (API if the serial is valid Code27, otherwise write
+   `devices` + `redis_device` directly) with the serial the AP actually sends —
+   read it from the `Kaiwoo-authentication` header's `sn=` field, not from your
+   notes.
+2. Fix the Redis key name. An API registration creates **`device/<serial>`**
+   because `mac` is still `""` at that moment, while every working device is
+   **`device/<mac_lower>`**. Until renamed, check-in returns `404 "Device Is Not
+   In The Network"` — a *different* 404 from "not registered", distinguishable
+   only by response size. Add the `mac` field too.
+3. Write a **fresh** secret (`secrets.token_urlsafe(24)`) and
+   `device_pairing = ""`.
+
+The AP then re-pairs on its next check-in, walking `404 → 463 → 200`. A transient
+`463` is **normal** mid-pairing, not a failure — only a `463` that persists past
+a couple of check-in intervals means anything.
