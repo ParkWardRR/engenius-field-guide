@@ -123,7 +123,24 @@ curl -sk -X POST "https://<epc>/api/v1/orgs/$ORG/hvs/$HV/networks/$NET/devices" 
 
 `$HV` is the org's `hierarchy_view_id` — read it off any existing device.
 
-Two prerequisites learned the hard way:
+A register call returns `mac: ""`: the API keys on the serial alone and binds the
+MAC at first check-in. The record it writes is otherwise complete — the `ap`
+subdoc's `profile.band` is derived from the model, so an `X42` serial comes back
+as `ECW230v3` with `2_4G|5G` and an `E4T` one as `ECW336` with 6 GHz included.
+
+Three prerequisites learned the hard way:
+
+- **The registration API enforces the Code27 check character; the check-in path
+  does not.** `POST /inventory` answers `400 {"status":"invalid"}` — with no hint
+  as to which rule failed — for anything that is not 12 chars with a valid check
+  char ([serial-numbers](serial-numbers.md)). Meanwhile a device whose `snextra`
+  is a hand-made serial that fails that check still completes check-in and
+  receives config, because check-in matches on the stored string only. That
+  asymmetry is the whole reason hand-seeded Mongo records exist on this
+  controller: a synthetic serial like `EPC2X420000000000000` can never be
+  registered through the API, only written directly. Prefer generating a
+  *valid* Code27 serial and going through the API — then the record is identical
+  to a real unit's.
 
 - **`fitregister.enable` must be `false`.** Otherwise registration tries to sync
   to EnGenius's hosted FitRegister and dies with *"Failed to get EPC info: EPC
