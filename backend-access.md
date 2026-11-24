@@ -373,3 +373,44 @@ perfectly healthy AP. Compare a known-good AP over the same window before
 concluding a unit reports no telemetry — a native ECW336 and a cross-flashed
 ECW230v3 showed 161 and 182 nulls out of 288 respectively, with their last
 populated sample at the *same* timestamp.
+
+### Measure airtime before paying to fix a channel plan
+
+The most useful thing EPC exposes for RF decisions is
+`GET …/devices/aps/{id}/channel-utilization` — a 5-minute series of per-channel
+utilization plus the AP's current channel per band. Pull it before acting on a
+channel plan, because a plan that looks broken on paper can be free in practice.
+
+Worked example from a five-AP fleet, 934 samples over 8.5 h. ACS had put **three
+of four APs on 6 GHz ch 5**, which reads as the fleet's worst defect:
+
+| 6 GHz channel | Occupancy | median | p90 | max |
+|---|---|---|---|---|
+| ch 5 | **3 APs sharing** | 1 % | 5 % | 16 % |
+| ch 37 | 1 AP alone | 1 % | 5 % | 10 % |
+
+Statistically identical. **Co-channel contention matters only in proportion to
+utilization**, and at ~1 % occupancy there is nothing to contend for. Acting on
+it would have meant an unsupported write to `devices.ap.radios` for no
+measurable gain.
+
+Per band on the same fleet:
+
+| Band | median | p90 |
+|---|---|---|
+| **2.4 GHz** | **26 %** | **49 %** |
+| 5 GHz | 2 % | 11 % |
+| 6 GHz | 1 % | 5 % |
+
+Two things fall out of that. The only loaded band was **2.4 GHz** — and its load
+was **external**, since it carried just two IoT clients, so the airtime was
+neighbours and interference rather than our own traffic. That makes channel
+*choice* matter far more there than our own reuse does, and pooling per-channel
+figures across APs is how you pick: ch 6 measured worst (median 32 %, p90 54 %)
+against ch 1 at 23 %/36 %, so narrowing the candidate list to `[1, 11]` is a
+real, zero-risk gain where per-AP pinning was not.
+
+The corollary is about where to spend effort generally: the bands carrying all
+the *client* traffic (5/6 GHz here, 92 % of clients) were the idle ones, and the
+congested band carried almost no clients. Utilization and client count point in
+opposite directions, so check both before concluding anything.
