@@ -414,3 +414,29 @@ The corollary is about where to spend effort generally: the bands carrying all
 the *client* traffic (5/6 GHz here, 92 % of clients) were the idle ones, and the
 congested band carried almost no clients. Utilization and client count point in
 opposite directions, so check both before concluding anything.
+
+### Measure the fast-transition ratio during active hours only
+
+`ap_11r_ft_assoc` versus `ap_client_assoc` is the right way to tell whether
+802.11r is actually working, but the ratio is only meaningful when clients are
+*moving*. Bucketed by hour on a settled fleet:
+
+| Hours | FT share |
+|---|---|
+| 19:00–00:00 and 06:00–07:00 (active) | **21–35 %** |
+| 01:00–05:00 (idle) | **0 %** |
+
+Nothing degraded overnight — associated client count held flat. In the dead
+hours the handful of associations are devices **waking from sleep and rejoining
+the same AP**, which cannot be a fast transition and so only inflates the
+denominator. Average the two windows together and a working configuration reads
+as mediocre; sample only the quiet hours and it reads as broken.
+
+Two related traps when judging any of this:
+
+- **A window containing a config push is useless.** Each push reloads wifi on
+  every AP and every client re-associates from scratch, which buries the signal.
+  Measure after `is_config_up_to_date` is 5/5 and has stayed there.
+- **Kicks continue overnight** (`ap_kick_station` kept firing 3–7 per hour while
+  nobody roamed), because the gates shed idle clients sitting below threshold.
+  Kick activity is evidence the feature is enabled, not evidence of churn.
