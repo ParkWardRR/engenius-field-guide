@@ -295,6 +295,14 @@ how it put three of four APs on 6 GHz ch 5 and the two highest-overlap APs on
 the same 2.4 GHz channel. Constraining the candidate list bounds the damage but
 does **not** make it assign distinct channels.
 
+**Verifying the gates are live: watch for two new event types.** Once
+`fast_handover` is enabled, EPC's `log` collection starts emitting
+**`ap_fast_handover`** and **`ap_kick_station`** events. Neither appears at all
+while the feature is off, so their presence is direct proof the gates are
+firing — far better evidence than inferring it from an RSSI improvement, which
+could just be clients moving. Expect `ap_kick_station` to account for the
+disappearance of far clients.
+
 **Band steering cannot cross SSIDs.** `band_steering` operates only within one
 SSID that is enabled on multiple bands. With a split-SSID design (one SSID per
 band) it can never move a client from the 2.4 GHz SSID to the 5/6 GHz one — only
