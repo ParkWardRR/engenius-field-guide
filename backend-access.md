@@ -307,3 +307,34 @@ disappearance of far clients.
 SSID that is enabled on multiple bands. With a split-SSID design (one SSID per
 band) it can never move a client from the 2.4 GHz SSID to the 5/6 GHz one — only
 removing the 2.4 SSID from that client's saved networks will.
+
+### `force_ac` can be lost in place on an already-adopted AP
+
+Known risk: a *freshly flashed* AP boots with an empty `force_ac`. Less obvious,
+and seen on a live fleet 2026-11-24: **an AP that has been adopted and running
+for hours can lose `force_ac` on its own**, without a reboot or a reset.
+
+The symptom is deceptive. EPC showed the AP `raccoon.online: false` with a
+`last_seen` an hour stale, which reads like a dead AP — but it was entirely
+healthy: 0 % packet loss at 0.5 ms, local GUI `200`, **uptime 11 h 27 m** (so no
+reboot), cpu 0 %, 54 % memory free, and still serving a client on 5 GHz. Only
+its controller pointer was gone, so it had silently stopped checking in. With no
+DHCP option 43 on that segment there was nothing to re-discover the controller
+with.
+
+Diagnosis is one call per AP — don't infer it from EPC's online flag:
+
+```bash
+curl -s "http://$AP/api/mgm/force_ac" -H "Authorization: Bearer $TOK"
+# -> {"data":{"ip":""}}   <-- orphaned
+```
+
+Fix is the same as for a fresh unit (`POST /api/mgm/force_ac` + `/api/sys/apply`);
+recovery was immediate, with the AP back `online: true` inside 30 s.
+
+Two things worth taking from this. **An AP reporting offline in the controller
+while answering ping and serving clients is almost always a controller-pointer
+or agent problem, not a hardware one** — check `force_ok`/`force_ac` and its
+uptime before touching power or cabling. And **audit `force_ac` across the whole
+fleet when one AP goes quiet**, since the useful question is whether it is
+spreading; here exactly one of five had lost it.
