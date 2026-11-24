@@ -338,3 +338,38 @@ or agent problem, not a hardware one** — check `force_ok`/`force_ac` and its
 uptime before touching power or cabling. And **audit `force_ac` across the whole
 fleet when one AP goes quiet**, since the useful question is whether it is
 spreading; here exactly one of five had lost it.
+
+### A channel policy only takes effect when ACS next runs
+
+Setting `channel_list` / `is_exclude_dfs_channel` does **not** move an AP that is
+already on air. The constraint is applied by the AP's next auto-channel
+selection, and ACS can go hours without re-running — on a five-AP fleet there
+were **0 ACS runs in the four hours** after a policy push.
+
+The result looks like selective non-compliance. After pushing
+`is_exclude_dfs_channel: true` with `channel_list: [36,44,149,157]`, four APs
+happened to be sitting on 149/153/40 (inside the set, so apparently obedient)
+while one sat on **104 — a DFS channel outside the set**. The tempting
+conclusion is that *that* unit's firmware ignores the policy, and it is wrong:
+every AP was still on a pick made *before* the policy arrived. Rebooting the
+odd one out made it re-select immediately, and it chose 149 and ch 6 — both
+inside the lists, non-DFS.
+
+Two practical consequences:
+
+- **Verify a channel policy by forcing a re-selection, not by reading the
+  current channel.** A reboot of one AP is the cheapest conclusive test, and
+  costs nothing if you pick an AP with no associated clients.
+- **A policy push leaves the fleet's channel distribution essentially
+  unchanged** until each AP independently re-runs ACS. If you need the plan
+  actually in force, nudge each AP; otherwise expect the old, arbitrary
+  assignment to persist. Whether that matters depends entirely on utilization —
+  at 1–2 % occupancy it does not.
+
+Beware the related misread on the **channel-utilization endpoint**: it returns a
+fixed 288-slot, 24-hour, 5-minute grid and **pads absent samples with `null`**.
+Reading the tail of `details[]` therefore shows `curr_chan: null` for a
+perfectly healthy AP. Compare a known-good AP over the same window before
+concluding a unit reports no telemetry — a native ECW336 and a cross-flashed
+ECW230v3 showed 161 and 182 nulls out of 288 respectively, with their last
+populated sample at the *same* timestamp.
