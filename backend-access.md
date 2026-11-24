@@ -251,3 +251,51 @@ stay false until it next checks in. That is normal, not a failed rename.
 Keep EPC's device names identical to the DHCP/DNS reservations. Matching the two
 means a name in the controller, a lease, and a DNS record all refer to the same
 box, which is what makes "which AP is this?" answerable at 2am.
+
+### Radio and roaming tuning via the AP policy API
+
+`PATCH /orgs/{org}/hvs/{hv}/networks/{net}/policy/aps` with `{"radios": [...]}`
+round-tripped from the GET. Four traps, all of which cost time:
+
+- **`fast_handover` is the roaming gate, and it is per-radio.** It is an object
+  with three independent thresholds, all `is_enable:false` by default:
+  `force_disconnect` (shed a client below RSSI), `association_request` (refuse
+  to associate), `probe_request` (don't answer probes). This is what makes
+  802.11r actually fire — with it off, clients ride a link to failure and then
+  re-associate from scratch instead of fast-transitioning.
+- **On 6 GHz, `fast_handover` is the *only* gate.** The 6G radio object has no
+  `rssi_threshold` key at all (2.4G and 5G do, defaulting to −95). So "there's
+  no way to gate 6 GHz" is wrong — it is there, under a different name.
+- **`channel_list` has an asymmetric read/write shape.** GET returns a plain
+  list (`[]`), the *delivered* config wraps it as
+  `channel_candidate_list: {"is_enable":…, "channel_list":[…]}`, and **PATCH
+  wants the plain list**. Sending the wrapped object fails with
+  `400 {"channel_list": "Only lists and tuples may be used in a list field"}`.
+- **There is no per-AP radio override through the API.** `PATCH
+  …/devices/aps/{device_id}` declares no body model — it validates inline and
+  accepts only `name`, `description`, `profile`, `ethernet`, `ssid_profiles`.
+  A `radios` key is rejected as `Invalid Body` in every shape. Per-AP channel
+  pinning therefore needs the web UI (whose login is RSA-encrypted in browser
+  JS, so not scriptable) or a direct write to `devices.ap.radios` with
+  `is_override`. Network-wide policy plus a candidate list is the only
+  API-supported lever.
+
+**Judging channel assignment: wait for convergence first.** `ap_acs_result`
+entries logged *during* a config push reflect the **old** config, because the
+AP reloads wifi and re-runs ACS before applying what it just fetched. Right
+after a push that excluded DFS, the ACS log still showed picks of 104/120/136
+(all DFS); once `is_config_up_to_date` went 5/5, the same APs moved to
+non-DFS 149/153. Reading the log too early looks exactly like "the firmware
+ignores the constraint".
+
+**ACS is choosing blind on this fleet.** Every 5 GHz and 6 GHz pick logs
+`totalrssi=0` and every 2.4 GHz pick logs `totalrssi=65535` — a sentinel, not a
+measurement. With no survey input its choices are close to arbitrary, which is
+how it put three of four APs on 6 GHz ch 5 and the two highest-overlap APs on
+the same 2.4 GHz channel. Constraining the candidate list bounds the damage but
+does **not** make it assign distinct channels.
+
+**Band steering cannot cross SSIDs.** `band_steering` operates only within one
+SSID that is enabled on multiple bands. With a split-SSID design (one SSID per
+band) it can never move a client from the 2.4 GHz SSID to the 5/6 GHz one — only
+removing the 2.4 SSID from that client's saved networks will.
