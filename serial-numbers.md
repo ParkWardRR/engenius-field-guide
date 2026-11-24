@@ -122,7 +122,14 @@ model *name* to a code through a `case` table, re-encodes the decimal sequence
 as 4 base-27 digits after `% 531441`, and appends the check char. It is the
 authoritative source for everything in [Format](#format) above.
 
-Two things to know before relying on it:
+The conversion itself is also available off-device, verified against this
+script's own output rather than a re-derivation of it:
+
+```sh
+quarry serial --model EWS377APv3 --from-legacy 228001234   # -> 2280X441DL2L
+```
+
+Two things to know before relying on the script itself:
 
 - **It is frozen SDK content, not per-series.** Byte-identical in a Cloud6E
   ECW336 1.8.118-12 image and a Fit6 EWS377-FIT 1.1.65-2 image, and its table
@@ -192,6 +199,11 @@ wants: copy the unit's own four characters across. To *number* a new unit
 instead, `--seq N` encodes the base-27 digits for you (`--seq 1` → `111D`),
 wrapping at 27⁴ like the vendor does. `snextra` emits the complete serial plus
 eight `*`, the shape a FIT unit's field 19 actually holds.
+
+`quarry check <serial>` reports `shape` alongside validity — whether the date,
+factory digit and sequence field match the layout above — which is how you spot
+a hand-built or re-stamped serial whose check character is nonetheless correct.
+It is advisory and does not affect the command's exit status.
 
 > Both commands used to fall short here and the surrounding docs described that:
 > `--suffix` defaulted to `0001`, which no factory serial can contain, and
