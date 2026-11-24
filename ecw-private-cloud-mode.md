@@ -228,3 +228,47 @@ One stale observation to ignore: earlier notes read "the AP logs `enable radio`
 for `wifi0/1/3` but never `wifi2`, therefore 6 GHz is held down." That inference
 was **unsound** — the `wifiN`↔band mapping was never established, and three
 enabled radios is exactly what a working tri-band AP looks like.
+
+## Expected noise: `dolphin` restarts every 5 minutes, forever
+
+On a self-hosted controller every managed AP logs this to the console at a
+steady 5-minute cadence:
+
+```
+[dolphin_pong_guard] pong status file missing, restarting dolphin
+```
+
+It is **not** a fault, and not specific to a cross-flashed unit — it is
+inherent to self-hosting EPC instead of EnGenius Cloud. Mechanism, read out of
+the stock ECW230v3 1.8.118-12 rootfs:
+
+- `/usr/bin/dolphin` is the AP's cloud realtime agent. It writes
+  `/var/log/ezmcloud/dolphin_pong_status` **only when it receives a pong frame**
+  over its cloud channel (`receive pong frame` / `watchdog: no pong timeout,
+  restart` are its own strings).
+- `/usr/sbin/ezmcheckin_handler` runs `dolphin_pong_guard`: with a 600 s
+  post-boot grace period and a 600 s staleness threshold, a **missing** status
+  file means `dolphin delete_first_dolphin_server` + `restart`.
+- The guard only arms when at least one of `ezmcloud.ezmcloud.secret`,
+  `epc_secret` or `fitmode` is set — i.e. exactly once the unit is adopted.
+- The self-hosted controller never sends that frame. `epc-raccoon`'s binary
+  contains no pong implementation, and the only "pong" in `epc-api` is
+  `GET /api/v1/system/diagnostic/ping`, an unrelated API liveness probe that
+  returns the literal string.
+
+So the status file can never appear, the guard fires forever, and you get a
+process restart plus one console line every five minutes on every adopted AP.
+
+**What it does not break** (verified on a live 5-AP fleet): check-ins return
+`200`, config pushes apply and confirm (`is_config_up_to_date: true`), raccoon
+presence reports `online: true`, and associated clients are reported to the
+controller. Treat it as cosmetic.
+
+**Don't try to silence it by clearing `secret`/`epc_secret`/`fitmode`** — those
+are precisely what adoption requires; emptying them to quiet the guard would
+un-adopt the AP. If the console noise is actually in the way, suppress at the
+logging end rather than disarming the guard.
+
+Worth knowing mainly so it is not mistaken for a symptom while chasing an
+unrelated problem: it looks alarming in a console capture, and it will be
+present in *every* capture taken from an adopted AP.
